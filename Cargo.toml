@@ -6,4 +6,8 @@ edition = "2024"
 [dependencies]
 diesel = { version = "*", features = ["r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"] }
 diesel_migrations = "*"
+iced = "*"
 thiserror = "*"
+
+# to have sqlite libraries bundled in windows binary
+libsqlite3-sys = { version = "*", features = ["bundled-windows"] }

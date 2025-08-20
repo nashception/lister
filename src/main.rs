@@ -1,3 +1,4 @@
+extern crate libsqlite3_sys;
 use crate::schema::file_entries::{CategoryId, DriveId};
 use crate::schema::{drive_entries, file_categories, file_entries};
 use diesel::prelude::*;
@@ -6,8 +7,8 @@ use diesel::result::Error as DieselError;
 use diesel::ExpressionMethods;
 use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-
 mod schema;
+mod counter;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 pub type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
@@ -38,7 +39,7 @@ fn lister_repository_with_database() {
         pool
     }
 
-    fn run_migrations(pool: &Pool<ConnectionManager<SqliteConnection>>) {
+    fn run_migrations(pool: &DieselPool) {
         let mut conn = pool.get().expect("Failed to get connection from pool");
         conn.run_pending_migrations(MIGRATIONS)
             .expect("Migration failed");
