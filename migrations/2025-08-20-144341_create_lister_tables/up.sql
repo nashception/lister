@@ -4,11 +4,19 @@ CREATE TABLE file_categories
     name TEXT NOT NULL
 );
 
+CREATE TABLE drive_entries
+(
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL
+);
+
 CREATE TABLE file_entries
 (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
     categoryId INTEGER NOT NULL,
-    path        TEXT    NOT NULL,
-    weight      BIGINT  NOT NULL,
-    FOREIGN KEY (categoryId) REFERENCES file_categories (id)
+    driveId    INTEGER NOT NULL,
+    path       TEXT    NOT NULL,
+    weight     BIGINT  NOT NULL,
+    FOREIGN KEY (categoryId) REFERENCES file_categories (id),
+    FOREIGN KEY (driveId) REFERENCES drive_entries (id)
 );
