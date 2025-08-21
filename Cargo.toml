@@ -2,11 +2,12 @@
 name = "lister"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 diesel = { version = "*", features = ["r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"] }
 diesel_migrations = "*"
-iced = "*"
+iced = { version = "*", features = ["system"]}
 thiserror = "*"
 
 # to have sqlite libraries bundled in windows binary
