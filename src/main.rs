@@ -7,8 +7,8 @@ use diesel::result::Error as DieselError;
 use diesel::ExpressionMethods;
 use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-mod schema;
 mod counter;
+mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 pub type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
@@ -158,25 +158,30 @@ fn lister_repository_with_database() {
             path: String::from("Red Dead Redemption Remastered"),
             weight: 1500000,
         },]
-    )
-}
+    );
 
-#[derive(Clone, Debug, PartialEq)]
-struct FileCategory {
-    name: String,
-}
+    let lister_service = ListerService::new(lister_repository);
 
-#[derive(Clone, Debug, PartialEq)]
-struct DriveEntry {
-    name: String,
-}
+    let rows = lister_service
+        .list_files_by_category_id_and_drive_id(new_drive_id, new_category_id)
+        .unwrap();
 
-#[derive(Clone, Debug, PartialEq)]
-struct FileEntry {
-    category_id: i32,
-    drive_id: i32,
-    path: String,
-    weight: i64,
+    let expected = vec![
+        FileEntryModel {
+            path: String::from("Dr House/Season 1/Episode 1.mkv"),
+            weight: 2000000,
+        },
+        FileEntryModel {
+            path: String::from("Dr House/Season 1/Episode 2.mkv"),
+            weight: 2500000,
+        },
+        FileEntryModel {
+            path: String::from("Dr House/Season 1/Episode 3.mkv"),
+            weight: 3000000,
+        },
+    ];
+
+    assert_eq!(rows, expected);
 }
 
 trait ListerRepository {
@@ -188,8 +193,8 @@ trait ListerRepository {
     fn find_all_files_by_category_id(&self, category_id: i32) -> RepoResult<Vec<FileEntryEntity>>;
     fn find_all_files_by_category_id_and_drive_id(
         &self,
-        drive_id: i32,
         category_id: i32,
+        drive_id: i32,
     ) -> RepoResult<Vec<FileEntryEntity>>;
     fn find_all_files(&self) -> RepoResult<Vec<FileEntryEntity>>;
 }
@@ -267,13 +272,13 @@ impl ListerRepository for DieselListerRepository {
 
     fn find_all_files_by_category_id_and_drive_id(
         &self,
-        drive_id: i32,
         category_id: i32,
+        drive_id: i32,
     ) -> RepoResult<Vec<FileEntryEntity>> {
         let mut conn = self.pool.get()?;
         let rows = file_entries::table
-            .filter(DriveId.eq(drive_id))
             .filter(CategoryId.eq(category_id))
+            .filter(DriveId.eq(drive_id))
             .load::<FileEntryEntity>(&mut conn)?;
         Ok(rows)
     }
@@ -340,19 +345,87 @@ pub struct NewFileEntry<'a> {
     pub weight: i64,
 }
 
-impl From<FileCategoryEntity> for FileCategory {
-    fn from(row: FileCategoryEntity) -> Self {
-        Self { name: row.name }
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileCategoryModel {
+    pub id: i32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriveEntryModel {
+    pub id: i32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileEntryModel {
+    pub path: String,
+    pub weight: i64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceError {
+    #[error("Repository error: {0}")]
+    Repo(#[from] RepoError),
+
+    #[error("Drive '{0}' already exists")]
+    DuplicateDrive(String),
+
+    #[error("Category '{0}' already exists")]
+    DuplicateCategory(String),
+}
+
+pub type ServiceResult<T> = Result<T, ServiceError>;
+
+struct ListerService<R: ListerRepository> {
+    repo: R,
+}
+
+impl<R: ListerRepository> ListerService<R> {
+    pub fn new(repo: R) -> Self {
+        ListerService { repo }
+    }
+
+    pub fn list_categories(&self) -> ServiceResult<Vec<FileCategoryModel>> {
+        let entities = self.repo.find_all_categories()?;
+        Ok(entities.into_iter().map(|e| e.into()).collect())
+    }
+
+    pub fn list_files_by_category_id_and_drive_id(
+        &self,
+        drive_id: i32,
+        category_id: i32,
+    ) -> ServiceResult<Vec<FileEntryModel>> {
+        let files = self
+            .repo
+            .find_all_files_by_category_id_and_drive_id(category_id, drive_id)?;
+        Ok(files.into_iter().map(|f| f.into()).collect())
     }
 }
 
-impl From<FileEntryEntity> for FileEntry {
-    fn from(row: FileEntryEntity) -> Self {
+impl From<FileCategoryEntity> for FileCategoryModel {
+    fn from(value: FileCategoryEntity) -> Self {
         Self {
-            category_id: row.category_id,
-            drive_id: row.drive_id,
-            path: row.path,
-            weight: row.weight,
+            id: value.id,
+            name: value.name,
+        }
+    }
+}
+
+impl From<DriveEntryEntity> for DriveEntryModel {
+    fn from(value: DriveEntryEntity) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+        }
+    }
+}
+
+impl From<FileEntryEntity> for FileEntryModel {
+    fn from(value: FileEntryEntity) -> Self {
+        Self {
+            path: value.path,
+            weight: value.weight,
         }
     }
 }
