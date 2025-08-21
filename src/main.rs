@@ -21,6 +21,33 @@ const ITEMS_PER_PAGE: usize = 100;
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 
+#[test]
+fn insert_rows() {
+    let pool = get_connection_pool("app.db");
+    let backing: Vec<String> = (0..14000000)
+        .map(|i| format!("Dummy series/Episode {}", i))
+        .collect();
+
+    let repository = ListerRepository::new(pool);
+
+    repository.add_category(NewFileCategory { name: "Series" });
+    repository.add_drive(NewDriveEntry {
+        category_id: 1,
+        name: "Windows Drive",
+    });
+
+    let files: Vec<NewFileEntry> = backing
+        .iter()
+        .enumerate()
+        .map(|(i, s)| NewFileEntry {
+            drive_id: 1,
+            path: s.as_str(),
+            weight: 200_000 + (i as i64) * 42,
+        })
+        .collect();
+    repository.add_files(files);
+}
+
 fn main() -> iced::Result {
     println!("Hello, world!");
     iced::run("Lister", ListerApp::update, ListerApp::view)
@@ -362,60 +389,60 @@ fn run_migrations(pool: &DieselPool) {
         .expect("Migration failed");
 }
 
-#[test]
-fn lister_repository_with_database() {
-    let pool = get_connection_pool("file:memdb1?mode=memory&cache=shared");
-
-    let new_cat = NewFileCategory { name: "Cat Videos" };
-    let another_new_cat = NewFileCategory { name: "Games" };
-    let new_drive = NewDriveEntry {
-        category_id: 2,
-        name: "Windows Drive",
-    };
-    let another_new_drive = NewDriveEntry {
-        category_id: 2,
-        name: "Linux Drive",
-    };
-    let lister_repository = ListerRepository::new(pool);
-
-    let new_category_id = lister_repository.add_category(new_cat).unwrap();
-    let another_new_category_id = lister_repository.add_category(another_new_cat).unwrap();
-
-    let rows = lister_repository.find_all_categories().unwrap();
-
-    let expected = vec![
-        FileCategoryEntity {
-            id: new_category_id,
-            name: "Cat Videos".into(),
-        },
-        FileCategoryEntity {
-            id: another_new_category_id,
-            name: "Games".into(),
-        },
-    ];
-
-    assert_eq!(rows, expected);
-
-    let new_drive_id = lister_repository.add_drive(new_drive).unwrap();
-    let another_new_drive_id = lister_repository.add_drive(another_new_drive).unwrap();
-
-    let rows = lister_repository.find_all_drives_by_category_id(2).unwrap();
-
-    let expected = vec![
-        DriveEntryEntity {
-            id: new_drive_id,
-            category_id: 2,
-            name: "Windows Drive".into(),
-        },
-        DriveEntryEntity {
-            id: another_new_drive_id,
-            category_id: 2,
-            name: "Linux Drive".into(),
-        },
-    ];
-
-    assert_eq!(rows, expected);
-}
+// #[test]
+// fn lister_repository_with_database() {
+//     let pool = get_connection_pool("file:memdb1?mode=memory&cache=shared");
+//
+//     let new_cat = NewFileCategory { name: "Cat Videos" };
+//     let another_new_cat = NewFileCategory { name: "Games" };
+//     let new_drive = NewDriveEntry {
+//         category_id: 2,
+//         name: "Windows Drive",
+//     };
+//     let another_new_drive = NewDriveEntry {
+//         category_id: 2,
+//         name: "Linux Drive",
+//     };
+//     let lister_repository = ListerRepository::new(pool);
+//
+//     let new_category_id = lister_repository.add_category(new_cat).unwrap();
+//     let another_new_category_id = lister_repository.add_category(another_new_cat).unwrap();
+//
+//     let rows = lister_repository.find_all_categories().unwrap();
+//
+//     let expected = vec![
+//         FileCategoryEntity {
+//             id: new_category_id,
+//             name: "Cat Videos".into(),
+//         },
+//         FileCategoryEntity {
+//             id: another_new_category_id,
+//             name: "Games".into(),
+//         },
+//     ];
+//
+//     assert_eq!(rows, expected);
+//
+//     let new_drive_id = lister_repository.add_drive(new_drive).unwrap();
+//     let another_new_drive_id = lister_repository.add_drive(another_new_drive).unwrap();
+//
+//     let rows = lister_repository.find_all_drives_by_category_id(2).unwrap();
+//
+//     let expected = vec![
+//         DriveEntryEntity {
+//             id: new_drive_id,
+//             category_id: 2,
+//             name: "Windows Drive".into(),
+//         },
+//         DriveEntryEntity {
+//             id: another_new_drive_id,
+//             category_id: 2,
+//             name: "Linux Drive".into(),
+//         },
+//     ];
+//
+//     assert_eq!(rows, expected);
+// }
 
 #[derive(Clone)]
 struct ListerRepository {
@@ -472,10 +499,7 @@ impl ListerRepository {
     fn find_files_paginated(&self, offset: i64, limit: i64) -> RepositoryResult<PaginatedFiles> {
         let mut conn = self.pool.get()?;
 
-        let total_count: i64 = file_entries::table
-            .inner_join(drive_entries::table.inner_join(file_categories::table))
-            .count()
-            .get_result(&mut conn)?;
+        let total_count: i64 = file_entries::table.count().get_result(&mut conn)?;
 
         let files = file_entries::table
             .inner_join(drive_entries::table.inner_join(file_categories::table))
@@ -499,10 +523,9 @@ impl ListerRepository {
         limit: i64,
     ) -> RepositoryResult<PaginatedFiles> {
         let mut conn = self.pool.get()?;
-        let search_pattern = format!("%{}%", search_query.to_lowercase());
+        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
 
         let total_count: i64 = file_entries::table
-            .inner_join(drive_entries::table.inner_join(file_categories::table))
             .filter(file_entries::path.like(&search_pattern))
             .count()
             .get_result(&mut conn)?;
@@ -521,31 +544,6 @@ impl ListerRepository {
             .load(&mut conn)?;
 
         Ok(PaginatedFiles { files, total_count })
-    }
-
-    fn find_all_categories(&self) -> RepositoryResult<Vec<FileCategoryEntity>> {
-        let mut conn = self.pool.get()?;
-        let rows = file_categories::table.load(&mut conn)?;
-        Ok(rows)
-    }
-
-    fn find_all_drives_by_category_id(
-        &self,
-        category_id: i32,
-    ) -> RepositoryResult<Vec<DriveEntryEntity>> {
-        let mut conn = self.pool.get()?;
-        let rows = drive_entries::table
-            .filter(drive_entries::category_id.eq(category_id))
-            .load(&mut conn)?;
-        Ok(rows)
-    }
-
-    fn find_all_files_by_drive_id(&self, drive_id: i32) -> RepositoryResult<Vec<FileEntryEntity>> {
-        let mut conn = self.pool.get()?;
-        let rows = file_entries::table
-            .filter(file_entries::drive_id.eq(drive_id))
-            .load::<FileEntryEntity>(&mut conn)?;
-        Ok(rows)
     }
 }
 
@@ -604,26 +602,6 @@ struct NewFileEntry<'a> {
     weight: i64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct FileCategoryModel {
-    id: i32,
-    name: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct DriveEntryModel {
-    id: i32,
-    name: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct FileEntryModel {
-    category_name: String,
-    drive_name: String,
-    path: String,
-    weight: i64,
-}
-
 impl FileWithInfo {
     pub fn parent_dir(&self) -> String {
         Path::new(&self.path)
@@ -660,10 +638,7 @@ impl ListerService {
 
     fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {
         let paginated = self.repo.find_files_paginated(offset, limit)?;
-        Ok(PaginatedFiles {
-            files: paginated.files.into_iter().map(|e| e.into()).collect(),
-            total_count: paginated.total_count,
-        })
+        Ok(paginated)
     }
 
     fn search_files_paginated(
@@ -675,27 +650,6 @@ impl ListerService {
         let paginated = self
             .repo
             .search_files_paginated(search_query, offset, limit)?;
-        Ok(PaginatedFiles {
-            files: paginated.files.into_iter().map(|e| e.into()).collect(),
-            total_count: paginated.total_count,
-        })
-    }
-}
-
-impl From<FileCategoryEntity> for FileCategoryModel {
-    fn from(value: FileCategoryEntity) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-        }
-    }
-}
-
-impl From<DriveEntryEntity> for DriveEntryModel {
-    fn from(value: DriveEntryEntity) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-        }
+        Ok(paginated)
     }
 }
