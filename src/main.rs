@@ -8,7 +8,7 @@ use diesel::ExpressionMethods;
 use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
-use iced::widget::{button, column, row, scrollable, text, Rule};
+use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
 use iced::{Alignment, Element, Length};
 use std::path::Path;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
-const ITEMS_PER_PAGE: usize = 500;
+const ITEMS_PER_PAGE: usize = 100;
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 
@@ -41,8 +41,11 @@ enum Page {
 
 #[derive(Clone, Debug)]
 enum ReadMessage {
-    SearchPrevPage,
-    SearchNextPage,
+    PrevPage,
+    NextPage,
+    SearchSubmit,
+    ContentChanged(String),
+    SearchClear,
 }
 
 #[derive(Clone, Debug)]
@@ -53,7 +56,10 @@ enum WriteMessage {
 struct ReadPage {
     service: Arc<ListerService>,
 
+    search_query: String,
+
     all_files: Vec<FileEntryModel>,
+
     filtered_indices: Vec<usize>,
     current_page_index: usize,
 }
@@ -68,6 +74,7 @@ impl ReadPage {
         let filtered_indices = (0..all_files.len()).collect();
         Self {
             service,
+            search_query: Default::default(),
             all_files,
             filtered_indices,
             current_page_index: 0,
@@ -75,14 +82,33 @@ impl ReadPage {
     }
 
     fn view(&'_ self) -> Element<'_, ReadMessage> {
+        let search_section = self.search_section();
         let files = self.files();
         let pagination_section = self.create_pagination_section();
 
-
-        column![files, pagination_section]
+        column![search_section, files, pagination_section]
             .spacing(20)
             .padding(20)
             .into()
+    }
+
+    fn search_section(&'_ self) -> Element<'_, ReadMessage> {
+        let search_input = text_input("Search files across all drives...", &self.search_query)
+            .on_input(ReadMessage::ContentChanged)
+            .on_submit(ReadMessage::SearchSubmit)
+            .padding(10)
+            .width(Length::Fill);
+
+        let search_button = button(text("Search"))
+            .on_press(ReadMessage::SearchSubmit)
+            .padding(10);
+
+        let clear_button = button(text("Clear"))
+            .on_press(ReadMessage::SearchClear)
+            .padding(10)
+            .style(button::secondary);
+
+        column![row![search_input, search_button, clear_button].spacing(10)].into()
     }
 
     fn files(&'_ self) -> Element<'_, ReadMessage> {
@@ -117,7 +143,7 @@ impl ReadPage {
 
         let prev_button = button("Prev")
             .on_press_maybe(if self.current_page_index > 0 {
-                Some(ReadMessage::SearchPrevPage)
+                Some(ReadMessage::PrevPage)
             } else {
                 None
             })
@@ -138,7 +164,7 @@ impl ReadPage {
 
         let next_button = button("Next")
             .on_press_maybe(if self.current_page_index < total_pages - 1 {
-                Some(ReadMessage::SearchNextPage)
+                Some(ReadMessage::NextPage)
             } else {
                 None
             })
@@ -167,6 +193,12 @@ impl ReadPage {
         (total_items + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE.max(1)
     }
 
+    pub fn previous_page(&mut self) {
+        if self.current_page_index > 0 {
+            self.current_page_index -= 1;
+        }
+    }
+
     pub fn next_page(&mut self) {
         let total_pages = self.total_pages();
         if self.current_page_index + 1 < total_pages {
@@ -174,16 +206,24 @@ impl ReadPage {
         }
     }
 
-    pub fn previous_page(&mut self) {
-        if self.current_page_index > 0 {
-            self.current_page_index -= 1;
-        }
+    pub fn search(&mut self) {
+        let query = &self.search_query.to_lowercase();
+        self.filtered_indices = self
+            .all_files
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.path.contains(query))
+            .map(|(i, f)| i)
+            .collect()
     }
 
     fn update(&mut self, message: ReadMessage) {
         match message {
-            ReadMessage::SearchPrevPage => self.previous_page(),
-            ReadMessage::SearchNextPage => self.next_page(),
+            ReadMessage::PrevPage => self.previous_page(),
+            ReadMessage::NextPage => self.next_page(),
+            ReadMessage::SearchSubmit => self.search(),
+            ReadMessage::SearchClear => self.search_query = String::new(),
+            ReadMessage::ContentChanged(content) => self.search_query = content,
         }
     }
 }
@@ -194,7 +234,7 @@ impl WritePage {
     }
 
     fn view(&'_ self) -> Element<'_, WriteMessage> {
-        text("Error").into()
+        text("Write Page").into()
     }
 
     fn update(&mut self, message: WriteMessage) {
@@ -226,9 +266,22 @@ fn init_back_end() -> Arc<ListerService> {
 impl ListerApp {
     fn view(&'_ self) -> Element<'_, AppMessage> {
         let nav_bar = row![
-            button("Read").on_press(AppMessage::GoToRead),
-            button("Write").on_press(AppMessage::GoToWrite)
-        ];
+            button(text("Read").align_x(Alignment::Center))
+                .on_press(AppMessage::GoToRead)
+                .style(match &self.current_page {
+                    Page::Read(_) => button::primary,
+                    Page::Write(_) => button::secondary,
+                })
+                .width(Length::Fill),
+            button(text("Write").align_x(Alignment::Center))
+                .on_press(AppMessage::GoToWrite)
+                .style(match &self.current_page {
+                    Page::Read(_) => button::secondary,
+                    Page::Write(_) => button::primary,
+                })
+                .width(Length::Fill)
+        ]
+        .spacing(10);
 
         let content = match &self.current_page {
             Page::Read(page) => page.view().map(AppMessage::Read),
@@ -404,7 +457,7 @@ impl ListerRepository {
                 drive_entries::name,
                 file_entries::path,
                 file_entries::weight,
-                ))
+            ))
             .load(&mut conn)?;
         Ok(files)
     }
