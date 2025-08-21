@@ -53,14 +53,16 @@ enum WriteMessage {
     Ok(usize),
 }
 
+struct PaginatedFiles {
+    files: Vec<FileWithInfo>,
+    total_count: i64,
+}
+
 struct ReadPage {
     service: Arc<ListerService>,
-
     search_query: String,
-
-    all_files: Vec<FileEntryModel>,
-
-    filtered_indices: Vec<usize>,
+    current_files: Vec<FileWithInfo>,
+    total_count: i64,
     current_page_index: usize,
 }
 
@@ -70,14 +72,38 @@ struct WritePage {
 
 impl ReadPage {
     fn new(service: Arc<ListerService>) -> Self {
-        let all_files = service.find_all_files().expect("Error finding all files");
-        let filtered_indices = (0..all_files.len()).collect();
-        Self {
+        let mut page = Self {
             service,
-            search_query: Default::default(),
-            all_files,
-            filtered_indices,
+            search_query: String::new(),
+            current_files: Vec::new(),
+            total_count: 0,
             current_page_index: 0,
+        };
+        page.load_current_page();
+        page
+    }
+
+    fn load_current_page(&mut self) {
+        let offset = (self.current_page_index * ITEMS_PER_PAGE) as i64;
+        let limit = ITEMS_PER_PAGE as i64;
+
+        let result = if self.search_query.is_empty() {
+            self.service.find_files_paginated(offset, limit)
+        } else {
+            self.service
+                .search_files_paginated(&self.search_query, offset, limit)
+        };
+
+        match result {
+            Ok(paginated) => {
+                self.current_files = paginated.files;
+                self.total_count = paginated.total_count;
+            }
+            Err(e) => {
+                eprintln!("Error loading files: {:?}", e);
+                self.current_files = Vec::new();
+                self.total_count = 0;
+            }
         }
     }
 
@@ -112,13 +138,10 @@ impl ReadPage {
     }
 
     fn files(&'_ self) -> Element<'_, ReadMessage> {
-        let start = self.current_page_index * ITEMS_PER_PAGE;
-        let end = (start + ITEMS_PER_PAGE).min(self.filtered_indices.len());
-        let files_to_show = &self.filtered_indices[start..end];
-        let file_rows: Vec<Element<'_, ReadMessage>> = files_to_show
+        let file_rows: Vec<Element<'_, ReadMessage>> = self
+            .current_files
             .iter()
-            .map(|&i| {
-                let file = &self.all_files[i];
+            .map(|file| {
                 row![
                     text(&file.category_name).width(Length::FillPortion(1)),
                     text(&file.drive_name).width(Length::FillPortion(2)),
@@ -130,6 +153,7 @@ impl ReadPage {
                 .into()
             })
             .collect();
+
         column![
             Rule::horizontal(1),
             scrollable(column(file_rows)).height(Length::Fill),
@@ -158,18 +182,18 @@ impl ReadPage {
             "{:^5} / {:^5} - {:^7}",
             self.current_page_index + 1,
             total_pages,
-            self.filtered_indices.len()
+            self.total_count
         ))
         .size(14);
 
         let next_button = button("Next")
-            .on_press_maybe(if self.current_page_index < total_pages - 1 {
+            .on_press_maybe(if self.current_page_index < total_pages.saturating_sub(1) {
                 Some(ReadMessage::NextPage)
             } else {
                 None
             })
             .padding(8)
-            .style(if self.current_page_index < total_pages - 1 {
+            .style(if self.current_page_index < total_pages.saturating_sub(1) {
                 button::secondary
             } else {
                 button::text
@@ -182,20 +206,17 @@ impl ReadPage {
     }
 
     fn total_pages(&self) -> usize {
-        let total_items = if self.filtered_indices.is_empty() {
+        if self.total_count == 0 {
             1
-        } else if self.filtered_indices.is_empty() {
-            self.all_files.len()
         } else {
-            self.filtered_indices.len()
-        };
-
-        (total_items + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE.max(1)
+            ((self.total_count as usize) + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE
+        }
     }
 
     pub fn previous_page(&mut self) {
         if self.current_page_index > 0 {
             self.current_page_index -= 1;
+            self.load_current_page();
         }
     }
 
@@ -203,18 +224,19 @@ impl ReadPage {
         let total_pages = self.total_pages();
         if self.current_page_index + 1 < total_pages {
             self.current_page_index += 1;
+            self.load_current_page();
         }
     }
 
     pub fn search(&mut self) {
-        let query = &self.search_query.to_lowercase();
-        self.filtered_indices = self
-            .all_files
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| f.path.contains(query))
-            .map(|(i, f)| i)
-            .collect()
+        self.current_page_index = 0;
+        self.load_current_page();
+    }
+
+    pub fn clear_search(&mut self) {
+        self.search_query = String::new();
+        self.current_page_index = 0;
+        self.load_current_page();
     }
 
     fn update(&mut self, message: ReadMessage) {
@@ -222,7 +244,7 @@ impl ReadPage {
             ReadMessage::PrevPage => self.previous_page(),
             ReadMessage::NextPage => self.next_page(),
             ReadMessage::SearchSubmit => self.search(),
-            ReadMessage::SearchClear => self.search_query = String::new(),
+            ReadMessage::SearchClear => self.clear_search(),
             ReadMessage::ContentChanged(content) => self.search_query = content,
         }
     }
@@ -244,7 +266,6 @@ impl WritePage {
 
 struct ListerApp {
     service: Arc<ListerService>,
-
     current_page: Page,
 }
 
@@ -448,8 +469,14 @@ impl ListerRepository {
         Ok(())
     }
 
-    fn find_all_files(&self) -> RepositoryResult<Vec<FileWithInfo>> {
+    fn find_files_paginated(&self, offset: i64, limit: i64) -> RepositoryResult<PaginatedFiles> {
         let mut conn = self.pool.get()?;
+
+        let total_count: i64 = file_entries::table
+            .inner_join(drive_entries::table.inner_join(file_categories::table))
+            .count()
+            .get_result(&mut conn)?;
+
         let files = file_entries::table
             .inner_join(drive_entries::table.inner_join(file_categories::table))
             .select((
@@ -458,8 +485,42 @@ impl ListerRepository {
                 file_entries::path,
                 file_entries::weight,
             ))
+            .limit(limit)
+            .offset(offset)
             .load(&mut conn)?;
-        Ok(files)
+
+        Ok(PaginatedFiles { files, total_count })
+    }
+
+    fn search_files_paginated(
+        &self,
+        search_query: &str,
+        offset: i64,
+        limit: i64,
+    ) -> RepositoryResult<PaginatedFiles> {
+        let mut conn = self.pool.get()?;
+        let search_pattern = format!("%{}%", search_query.to_lowercase());
+
+        let total_count: i64 = file_entries::table
+            .inner_join(drive_entries::table.inner_join(file_categories::table))
+            .filter(file_entries::path.like(&search_pattern))
+            .count()
+            .get_result(&mut conn)?;
+
+        let files = file_entries::table
+            .inner_join(drive_entries::table.inner_join(file_categories::table))
+            .select((
+                file_categories::name,
+                drive_entries::name,
+                file_entries::path,
+                file_entries::weight,
+            ))
+            .filter(file_entries::path.like(&search_pattern))
+            .limit(limit)
+            .offset(offset)
+            .load(&mut conn)?;
+
+        Ok(PaginatedFiles { files, total_count })
     }
 
     fn find_all_categories(&self) -> RepositoryResult<Vec<FileCategoryEntity>> {
@@ -563,7 +624,7 @@ struct FileEntryModel {
     weight: i64,
 }
 
-impl FileEntryModel {
+impl FileWithInfo {
     pub fn parent_dir(&self) -> String {
         Path::new(&self.path)
             .parent()
@@ -597,9 +658,27 @@ impl ListerService {
         ListerService { repo }
     }
 
-    fn find_all_files(&self) -> ServiceResult<Vec<FileEntryModel>> {
-        let entities = self.repo.find_all_files()?;
-        Ok(entities.into_iter().map(|e| e.into()).collect())
+    fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {
+        let paginated = self.repo.find_files_paginated(offset, limit)?;
+        Ok(PaginatedFiles {
+            files: paginated.files.into_iter().map(|e| e.into()).collect(),
+            total_count: paginated.total_count,
+        })
+    }
+
+    fn search_files_paginated(
+        &self,
+        search_query: &str,
+        offset: i64,
+        limit: i64,
+    ) -> ServiceResult<PaginatedFiles> {
+        let paginated = self
+            .repo
+            .search_files_paginated(search_query, offset, limit)?;
+        Ok(PaginatedFiles {
+            files: paginated.files.into_iter().map(|e| e.into()).collect(),
+            total_count: paginated.total_count,
+        })
     }
 }
 
@@ -617,17 +696,6 @@ impl From<DriveEntryEntity> for DriveEntryModel {
         Self {
             id: value.id,
             name: value.name,
-        }
-    }
-}
-
-impl From<FileWithInfo> for FileEntryModel {
-    fn from(value: FileWithInfo) -> Self {
-        Self {
-            category_name: value.category_name,
-            drive_name: value.drive_name,
-            path: value.path,
-            weight: value.weight,
         }
     }
 }
