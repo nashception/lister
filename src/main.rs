@@ -120,7 +120,8 @@ impl ReadPage {
         self.drives
             .iter()
             .enumerate()
-            .map(|(i, drive)| {let is_selected = self.selected_drive == Some(i + 1);
+            .map(|(i, drive)| {
+                let is_selected = self.selected_drive == Some(i + 1);
                 let button_style = if is_selected {
                     button::primary
                 } else {
@@ -306,10 +307,17 @@ fn init_back_end() -> Arc<ListerService> {
 
 impl ListerApp {
     fn view(&'_ self) -> Element<'_, AppMessage> {
-        match &self.current_page {
+        let nav_bar = row![
+            button("Read").on_press(AppMessage::GoToRead),
+            button("Write").on_press(AppMessage::GoToWrite)
+        ];
+
+        let content = match &self.current_page {
             Page::Read(page) => page.view().map(AppMessage::Read),
             Page::Write(page) => page.view().map(AppMessage::Write),
-        }
+        };
+
+        column![nav_bar, content].into()
     }
 
     fn update(&mut self, message: AppMessage) {
