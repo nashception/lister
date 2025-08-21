@@ -41,8 +41,6 @@ enum Page {
 
 #[derive(Clone, Debug)]
 enum ReadMessage {
-    CategorySelected(usize),
-    DriveSelected(usize),
     SearchPrevPage,
     SearchNextPage,
 }
@@ -55,14 +53,9 @@ enum WriteMessage {
 struct ReadPage {
     service: Arc<ListerService>,
 
-    categories: Vec<FileCategoryModel>,
-    drives: Vec<DriveEntryModel>,
-    files: Vec<FileEntryModel>,
+    all_files: Vec<FileEntryModel>,
     filtered_indices: Vec<usize>,
     current_page_index: usize,
-
-    selected_category: Option<usize>,
-    selected_drive: Option<usize>,
 }
 
 struct WritePage {
@@ -71,68 +64,25 @@ struct WritePage {
 
 impl ReadPage {
     fn new(service: Arc<ListerService>) -> Self {
-        let categories = service.list_categories().expect("Error listing categories");
-        println!("categories: {:?}", categories);
+        let all_files = service.find_all_files().expect("Error finding all files");
+        let filtered_indices = (0..all_files.len()).collect();
         Self {
             service,
-            categories,
-            drives: vec![],
-            files: vec![],
-            filtered_indices: vec![],
+            all_files,
+            filtered_indices,
             current_page_index: 0,
-            selected_category: None,
-            selected_drive: None,
         }
     }
 
     fn view(&'_ self) -> Element<'_, ReadMessage> {
-        let categories = self.categories();
-        let drives = self.drives();
         let files = self.files();
         let pagination_section = self.create_pagination_section();
 
-        column![row(categories), row(drives), files, pagination_section]
+
+        column![files, pagination_section]
             .spacing(20)
             .padding(20)
             .into()
-    }
-
-    fn categories(&'_ self) -> Vec<Element<'_, ReadMessage>> {
-        self.categories
-            .iter()
-            .enumerate()
-            .map(|(i, category)| {
-                let is_selected = self.selected_category == Some(i + 1);
-                let button_style = if is_selected {
-                    button::primary
-                } else {
-                    button::secondary
-                };
-                button(text(category.name.clone()))
-                    .style(button_style)
-                    .on_press(ReadMessage::CategorySelected(i))
-                    .into()
-            })
-            .collect()
-    }
-
-    fn drives(&'_ self) -> Vec<Element<'_, ReadMessage>> {
-        self.drives
-            .iter()
-            .enumerate()
-            .map(|(i, drive)| {
-                let is_selected = self.selected_drive == Some(i + 1);
-                let button_style = if is_selected {
-                    button::primary
-                } else {
-                    button::secondary
-                };
-                button(text(drive.name.clone()))
-                    .style(button_style)
-                    .on_press(ReadMessage::DriveSelected(i))
-                    .into()
-            })
-            .collect()
     }
 
     fn files(&'_ self) -> Element<'_, ReadMessage> {
@@ -142,10 +92,12 @@ impl ReadPage {
         let file_rows: Vec<Element<'_, ReadMessage>> = files_to_show
             .iter()
             .map(|&i| {
-                let file = &self.files[i];
+                let file = &self.all_files[i];
                 row![
-                    text(file.parent_dir()).width(Length::FillPortion(4)),
-                    text(file.file_name()).width(Length::FillPortion(5)),
+                    text(&file.category_name).width(Length::FillPortion(1)),
+                    text(&file.drive_name).width(Length::FillPortion(2)),
+                    text(file.parent_dir()).width(Length::FillPortion(3)),
+                    text(file.file_name()).width(Length::FillPortion(4)),
                     text(format_size(file.weight as u64, DECIMAL)).width(Length::FillPortion(1))
                 ]
                 .padding(3)
@@ -207,7 +159,7 @@ impl ReadPage {
         let total_items = if self.filtered_indices.is_empty() {
             1
         } else if self.filtered_indices.is_empty() {
-            self.files.len()
+            self.all_files.len()
         } else {
             self.filtered_indices.len()
         };
@@ -230,43 +182,9 @@ impl ReadPage {
 
     fn update(&mut self, message: ReadMessage) {
         match message {
-            ReadMessage::CategorySelected(index) => {
-                if let Some(category) = self.categories.get(index) {
-                    let category_id_usize = category.id as usize;
-                    if self.selected_category != Some(category_id_usize) {
-                        if self.selected_category != None {
-                            self.reset_to_category_selected();
-                        }
-                        self.selected_category = Some(category_id_usize);
-                        self.drives = self
-                            .service
-                            .find_all_drives_by_category_id(category_id_usize)
-                            .expect("Error finding drives");
-                    }
-                }
-            }
-            ReadMessage::DriveSelected(index) => {
-                if let Some(drive) = self.drives.get(index) {
-                    let drive_id_usize = drive.id as usize;
-                    self.selected_drive = Some(drive_id_usize);
-                    self.files = self
-                        .service
-                        .find_all_files_by_drive_id(drive_id_usize)
-                        .expect("Error finding files");
-                    self.filtered_indices = (0..self.files.len()).collect();
-                }
-            }
             ReadMessage::SearchPrevPage => self.previous_page(),
             ReadMessage::SearchNextPage => self.next_page(),
         }
-    }
-
-    fn reset_to_category_selected(&mut self) {
-        println!("reset_to_category_selected");
-        self.selected_drive = None;
-        self.files = vec![];
-        self.current_page_index = 0;
-        self.filtered_indices = vec![];
     }
 }
 
@@ -317,7 +235,7 @@ impl ListerApp {
             Page::Write(page) => page.view().map(AppMessage::Write),
         };
 
-        column![nav_bar, content].into()
+        column![nav_bar, content].padding(20).into()
     }
 
     fn update(&mut self, message: AppMessage) {
@@ -384,29 +302,6 @@ fn lister_repository_with_database() {
         category_id: 2,
         name: "Linux Drive",
     };
-    let new_files = vec![
-        NewFileEntry {
-            drive_id: 1,
-            path: "Dr House/Season 1/Episode 1.mkv",
-            weight: 2000000,
-        },
-        NewFileEntry {
-            drive_id: 1,
-            path: "Dr House/Season 1/Episode 2.mkv",
-            weight: 2500000,
-        },
-        NewFileEntry {
-            drive_id: 1,
-            path: "Dr House/Season 1/Episode 3.mkv",
-            weight: 3000000,
-        },
-        NewFileEntry {
-            drive_id: 2,
-            path: "Red Dead Redemption Remastered",
-            weight: 1500000,
-        },
-    ];
-
     let lister_repository = ListerRepository::new(pool);
 
     let new_category_id = lister_repository.add_category(new_cat).unwrap();
@@ -446,51 +341,6 @@ fn lister_repository_with_database() {
     ];
 
     assert_eq!(rows, expected);
-
-    lister_repository.add_files(new_files).unwrap();
-
-    let files = lister_repository.find_all_files().unwrap();
-
-    assert_eq!(
-        files,
-        vec![
-            FileEntryEntity {
-                id: 1,
-                drive_id: 1,
-                path: String::from("Dr House/Season 1/Episode 1.mkv"),
-                weight: 2000000,
-            },
-            FileEntryEntity {
-                id: 2,
-                drive_id: 1,
-                path: String::from("Dr House/Season 1/Episode 2.mkv"),
-                weight: 2500000,
-            },
-            FileEntryEntity {
-                id: 3,
-                drive_id: 1,
-                path: String::from("Dr House/Season 1/Episode 3.mkv"),
-                weight: 3000000,
-            },
-            FileEntryEntity {
-                id: 4,
-                drive_id: 2,
-                path: String::from("Red Dead Redemption Remastered"),
-                weight: 1500000,
-            },
-        ]
-    );
-
-    let files_by_category = lister_repository.find_all_files_by_drive_id(2).unwrap();
-    assert_eq!(
-        files_by_category,
-        vec![FileEntryEntity {
-            id: 4,
-            drive_id: 2,
-            path: String::from("Red Dead Redemption Remastered"),
-            weight: 1500000,
-        },]
-    );
 }
 
 #[derive(Clone)]
@@ -545,6 +395,20 @@ impl ListerRepository {
         Ok(())
     }
 
+    fn find_all_files(&self) -> RepositoryResult<Vec<FileWithInfo>> {
+        let mut conn = self.pool.get()?;
+        let files = file_entries::table
+            .inner_join(drive_entries::table.inner_join(file_categories::table))
+            .select((
+                file_categories::name,
+                drive_entries::name,
+                file_entries::path,
+                file_entries::weight,
+                ))
+            .load(&mut conn)?;
+        Ok(files)
+    }
+
     fn find_all_categories(&self) -> RepositoryResult<Vec<FileCategoryEntity>> {
         let mut conn = self.pool.get()?;
         let rows = file_categories::table.load(&mut conn)?;
@@ -567,12 +431,6 @@ impl ListerRepository {
         let rows = file_entries::table
             .filter(file_entries::drive_id.eq(drive_id))
             .load::<FileEntryEntity>(&mut conn)?;
-        Ok(rows)
-    }
-
-    fn find_all_files(&self) -> RepositoryResult<Vec<FileEntryEntity>> {
-        let mut conn = self.pool.get()?;
-        let rows = file_entries::table.load(&mut conn)?;
         Ok(rows)
     }
 }
@@ -599,6 +457,14 @@ struct DriveEntryEntity {
 struct FileEntryEntity {
     id: i32,
     drive_id: i32,
+    path: String,
+    weight: i64,
+}
+
+#[derive(Queryable)]
+struct FileWithInfo {
+    category_name: String,
+    drive_name: String,
     path: String,
     weight: i64,
 }
@@ -638,6 +504,8 @@ struct DriveEntryModel {
 
 #[derive(Debug, Clone, PartialEq)]
 struct FileEntryModel {
+    category_name: String,
+    drive_name: String,
     path: String,
     weight: i64,
 }
@@ -676,23 +544,8 @@ impl ListerService {
         ListerService { repo }
     }
 
-    fn list_categories(&self) -> ServiceResult<Vec<FileCategoryModel>> {
-        let entities = self.repo.find_all_categories()?;
-        Ok(entities.into_iter().map(|e| e.into()).collect())
-    }
-
-    fn find_all_drives_by_category_id(
-        &self,
-        category_id: usize,
-    ) -> ServiceResult<Vec<DriveEntryModel>> {
-        let entities = self
-            .repo
-            .find_all_drives_by_category_id(category_id as i32)?;
-        Ok(entities.into_iter().map(|e| e.into()).collect())
-    }
-
-    fn find_all_files_by_drive_id(&self, drive_id: usize) -> ServiceResult<Vec<FileEntryModel>> {
-        let entities = self.repo.find_all_files_by_drive_id(drive_id as i32)?;
+    fn find_all_files(&self) -> ServiceResult<Vec<FileEntryModel>> {
+        let entities = self.repo.find_all_files()?;
         Ok(entities.into_iter().map(|e| e.into()).collect())
     }
 }
@@ -715,9 +568,11 @@ impl From<DriveEntryEntity> for DriveEntryModel {
     }
 }
 
-impl From<FileEntryEntity> for FileEntryModel {
-    fn from(value: FileEntryEntity) -> Self {
+impl From<FileWithInfo> for FileEntryModel {
+    fn from(value: FileWithInfo) -> Self {
         Self {
+            category_name: value.category_name,
+            drive_name: value.drive_name,
             path: value.path,
             weight: value.weight,
         }
