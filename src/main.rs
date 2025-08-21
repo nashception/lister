@@ -7,13 +7,18 @@ use diesel::result::Error as DieselError;
 use diesel::ExpressionMethods;
 use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use iced::widget::{button, column, row, text};
-use iced::Element;
+use humansize::{format_size, DECIMAL};
+use iced::widget::{button, column, row, scrollable, text, Rule};
+use iced::{Alignment, Element, Length};
+use std::path::Path;
 use std::sync::Arc;
 
 mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
+
+const ITEMS_PER_PAGE: usize = 500;
+
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 
 fn main() -> iced::Result {
@@ -38,6 +43,8 @@ enum Page {
 enum ReadMessage {
     CategorySelected(usize),
     DriveSelected(usize),
+    SearchPrevPage,
+    SearchNextPage,
 }
 
 #[derive(Clone, Debug)]
@@ -48,13 +55,14 @@ enum WriteMessage {
 struct ReadPage {
     service: Arc<ListerService>,
 
-    categories: ServiceResult<Vec<FileCategoryModel>>,
-    drives: ServiceResult<Vec<DriveEntryModel>>,
+    categories: Vec<FileCategoryModel>,
+    drives: Vec<DriveEntryModel>,
+    files: Vec<FileEntryModel>,
+    filtered_indices: Vec<usize>,
+    current_page_index: usize,
 
     selected_category: Option<usize>,
     selected_drive: Option<usize>,
-
-    result_files: Vec<FileEntryModel>,
 }
 
 struct WritePage {
@@ -63,33 +71,45 @@ struct WritePage {
 
 impl ReadPage {
     fn new(service: Arc<ListerService>) -> Self {
-        let categories = service.list_categories();
+        let categories = service.list_categories().expect("Error listing categories");
         println!("categories: {:?}", categories);
         Self {
             service,
             categories,
-            drives: Ok(vec![]),
+            drives: vec![],
+            files: vec![],
+            filtered_indices: vec![],
+            current_page_index: 0,
             selected_category: None,
             selected_drive: None,
-            result_files: vec![],
         }
     }
 
     fn view(&'_ self) -> Element<'_, ReadMessage> {
         let categories = self.categories();
         let drives = self.drives();
+        let files = self.files();
+        let pagination_section = self.create_pagination_section();
 
-        column![row(categories), row(drives)].into()
+        column![row(categories), row(drives), files, pagination_section]
+            .spacing(20)
+            .padding(20)
+            .into()
     }
 
     fn categories(&'_ self) -> Vec<Element<'_, ReadMessage>> {
         self.categories
-            .as_ref()
-            .unwrap_or(&vec![])
             .iter()
             .enumerate()
             .map(|(i, category)| {
+                let is_selected = self.selected_category == Some(i + 1);
+                let button_style = if is_selected {
+                    button::primary
+                } else {
+                    button::secondary
+                };
                 button(text(category.name.clone()))
+                    .style(button_style)
                     .on_press(ReadMessage::CategorySelected(i))
                     .into()
             })
@@ -98,31 +118,154 @@ impl ReadPage {
 
     fn drives(&'_ self) -> Vec<Element<'_, ReadMessage>> {
         self.drives
-            .as_ref()
-            .unwrap_or(&vec![])
             .iter()
             .enumerate()
-            .map(|(i, drive)| {
+            .map(|(i, drive)| {let is_selected = self.selected_drive == Some(i + 1);
+                let button_style = if is_selected {
+                    button::primary
+                } else {
+                    button::secondary
+                };
                 button(text(drive.name.clone()))
+                    .style(button_style)
                     .on_press(ReadMessage::DriveSelected(i))
                     .into()
             })
             .collect()
     }
 
+    fn files(&'_ self) -> Element<'_, ReadMessage> {
+        let start = self.current_page_index * ITEMS_PER_PAGE;
+        let end = (start + ITEMS_PER_PAGE).min(self.filtered_indices.len());
+        let files_to_show = &self.filtered_indices[start..end];
+        let file_rows: Vec<Element<'_, ReadMessage>> = files_to_show
+            .iter()
+            .map(|&i| {
+                let file = &self.files[i];
+                row![
+                    text(file.parent_dir()).width(Length::FillPortion(4)),
+                    text(file.file_name()).width(Length::FillPortion(5)),
+                    text(format_size(file.weight as u64, DECIMAL)).width(Length::FillPortion(1))
+                ]
+                .padding(3)
+                .into()
+            })
+            .collect();
+        column![
+            Rule::horizontal(1),
+            scrollable(column(file_rows)).height(Length::Fill),
+            Rule::horizontal(1),
+        ]
+        .into()
+    }
+
+    fn create_pagination_section(&self) -> Element<'_, ReadMessage> {
+        let total_pages = self.total_pages();
+
+        let prev_button = button("Prev")
+            .on_press_maybe(if self.current_page_index > 0 {
+                Some(ReadMessage::SearchPrevPage)
+            } else {
+                None
+            })
+            .padding(8)
+            .style(if self.current_page_index > 0 {
+                button::secondary
+            } else {
+                button::text
+            });
+
+        let page_info = text(format!(
+            "{:^5} / {:^5} - {:^7}",
+            self.current_page_index + 1,
+            total_pages,
+            self.filtered_indices.len()
+        ))
+        .size(14);
+
+        let next_button = button("Next")
+            .on_press_maybe(if self.current_page_index < total_pages - 1 {
+                Some(ReadMessage::SearchNextPage)
+            } else {
+                None
+            })
+            .padding(8)
+            .style(if self.current_page_index < total_pages - 1 {
+                button::secondary
+            } else {
+                button::text
+            });
+
+        row![prev_button, page_info, next_button]
+            .spacing(20)
+            .align_y(Alignment::Center)
+            .into()
+    }
+
+    fn total_pages(&self) -> usize {
+        let total_items = if self.filtered_indices.is_empty() {
+            1
+        } else if self.filtered_indices.is_empty() {
+            self.files.len()
+        } else {
+            self.filtered_indices.len()
+        };
+
+        (total_items + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE.max(1)
+    }
+
+    pub fn next_page(&mut self) {
+        let total_pages = self.total_pages();
+        if self.current_page_index + 1 < total_pages {
+            self.current_page_index += 1;
+        }
+    }
+
+    pub fn previous_page(&mut self) {
+        if self.current_page_index > 0 {
+            self.current_page_index -= 1;
+        }
+    }
+
     fn update(&mut self, message: ReadMessage) {
         match message {
             ReadMessage::CategorySelected(index) => {
-                if let Some(category) = self.categories.as_ref().unwrap().get(index) {
+                if let Some(category) = self.categories.get(index) {
                     let category_id_usize = category.id as usize;
-                    self.selected_category = Some(category_id_usize);
-                    self.drives = self
-                        .service
-                        .find_all_drives_by_category_id(category_id_usize);
+                    if self.selected_category != Some(category_id_usize) {
+                        if self.selected_category != None {
+                            self.reset_to_category_selected();
+                        }
+                        self.selected_category = Some(category_id_usize);
+                        self.drives = self
+                            .service
+                            .find_all_drives_by_category_id(category_id_usize)
+                            .expect("Error finding drives");
+                    }
                 }
             }
-            ReadMessage::DriveSelected(index) => self.selected_drive = Some(index),
+            ReadMessage::DriveSelected(index) => {
+                if let Some(drive) = self.drives.get(index) {
+                    let drive_id_usize = drive.id as usize;
+                    self.selected_drive = Some(drive_id_usize);
+                    self.files = self
+                        .service
+                        .find_all_files_by_drive_id(drive_id_usize)
+                        .expect("Error finding files");
+                    self.filtered_indices = (0..self.files.len()).collect();
+                }
+            }
+            ReadMessage::SearchPrevPage => self.previous_page(),
+            ReadMessage::SearchNextPage => self.next_page(),
         }
+    }
+
+    fn reset_to_category_selected(&mut self) {
+        println!("reset_to_category_selected");
+        self.selected_drive = None;
+        self.files = vec![];
+        self.current_page_index = 0;
+        self.filtered_indices = vec![];
     }
 }
 
@@ -491,6 +634,22 @@ struct FileEntryModel {
     weight: i64,
 }
 
+impl FileEntryModel {
+    pub fn parent_dir(&self) -> String {
+        Path::new(&self.path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "".to_string())
+    }
+
+    pub fn file_name(&self) -> String {
+        Path::new(&self.path)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "".to_string())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum ServiceError {
     #[error("Repository error: {0}")]
@@ -521,6 +680,11 @@ impl ListerService {
         let entities = self
             .repo
             .find_all_drives_by_category_id(category_id as i32)?;
+        Ok(entities.into_iter().map(|e| e.into()).collect())
+    }
+
+    fn find_all_files_by_drive_id(&self, drive_id: usize) -> ServiceResult<Vec<FileEntryModel>> {
+        let entities = self.repo.find_all_files_by_drive_id(drive_id as i32)?;
         Ok(entities.into_iter().map(|e| e.into()).collect())
     }
 }
