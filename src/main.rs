@@ -49,7 +49,6 @@ fn insert_rows() {
 }
 
 fn main() -> iced::Result {
-    println!("Hello, world!");
     iced::run("Lister", ListerApp::update, ListerApp::view)
 }
 
@@ -68,8 +67,12 @@ enum Page {
 
 #[derive(Clone, Debug)]
 enum ReadMessage {
+    FirstPage,
     PrevPage,
+    PageInputChanged(String),
+    PageInputSubmit,
     NextPage,
+    LastPage,
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
@@ -89,6 +92,7 @@ struct ReadPage {
     service: Arc<ListerService>,
     search_query: String,
     current_files: Vec<FileWithInfo>,
+    page_input_value: String,
     total_count: i64,
     current_page_index: usize,
 }
@@ -103,6 +107,7 @@ impl ReadPage {
             service,
             search_query: String::new(),
             current_files: Vec::new(),
+            page_input_value : String::new(),
             total_count: 0,
             current_page_index: 0,
         };
@@ -192,6 +197,19 @@ impl ReadPage {
     fn create_pagination_section(&self) -> Element<'_, ReadMessage> {
         let total_pages = self.total_pages();
 
+        let first_button = button("First")
+            .on_press_maybe(if self.current_page_index > 0 {
+                Some(ReadMessage::FirstPage)
+            } else {
+                None
+            })
+            .padding(8)
+            .style(if self.current_page_index > 0 {
+                button::secondary
+            } else {
+                button::text
+            });
+
         let prev_button = button("Prev")
             .on_press_maybe(if self.current_page_index > 0 {
                 Some(ReadMessage::PrevPage)
@@ -226,7 +244,36 @@ impl ReadPage {
                 button::text
             });
 
-        row![prev_button, page_info, next_button]
+        let last_button = button("Last")
+            .on_press_maybe(if self.current_page_index < total_pages.saturating_sub(1) {
+                Some(ReadMessage::LastPage)
+            } else {
+                None
+            })
+            .padding(8)
+            .style(if self.current_page_index < total_pages.saturating_sub(1) {
+                button::secondary
+            } else {
+                button::text
+            });
+
+        let page_input = text_input(
+            "Page #",
+            &self.page_input_value,
+        )
+            .on_input(ReadMessage::PageInputChanged)
+            .on_submit(ReadMessage::PageInputSubmit)
+            .padding(8)
+            .width(Length::Fixed(100f32));
+
+        row![
+        first_button,
+        prev_button,
+        page_info,
+        next_button,
+        last_button,
+        page_input,
+    ]
             .spacing(20)
             .align_y(Alignment::Center)
             .into()
@@ -266,6 +313,15 @@ impl ReadPage {
         self.load_current_page();
     }
 
+    pub fn go_to_page(&mut self) {
+        if let Ok(query) = self.page_input_value.parse::<usize>() {
+            if query > 0 && query <= self.total_pages() {
+                self.current_page_index = query - 1;
+                self.load_current_page();
+            }
+        }
+    }
+
     fn update(&mut self, message: ReadMessage) {
         match message {
             ReadMessage::PrevPage => self.previous_page(),
@@ -273,6 +329,10 @@ impl ReadPage {
             ReadMessage::SearchSubmit => self.search(),
             ReadMessage::SearchClear => self.clear_search(),
             ReadMessage::ContentChanged(content) => self.search_query = content,
+            ReadMessage::FirstPage => self.current_page_index = 0,
+            ReadMessage::LastPage => self.current_page_index = self.total_pages() - 1,
+            ReadMessage::PageInputChanged(page_number) => self.page_input_value = page_number,
+            ReadMessage::PageInputSubmit => self.go_to_page()
         }
     }
 }
