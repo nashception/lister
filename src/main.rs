@@ -8,8 +8,9 @@ use diesel::ExpressionMethods;
 use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
+use iced::widget::scrollable::RelativeOffset;
 use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Task};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -98,6 +99,8 @@ struct ReadPage {
     page_input_value: String,
     total_count: i64,
     current_page_index: usize,
+
+    scroll_bar_id: scrollable::Id,
 }
 
 struct WritePage {
@@ -115,6 +118,7 @@ impl ReadPage {
             page_input_value: String::new(),
             total_count: 0,
             current_page_index: 0,
+            scroll_bar_id: scrollable::Id::unique(),
         };
         page.load_current_page();
         page
@@ -223,7 +227,9 @@ impl ReadPage {
 
         column![
             Rule::horizontal(1),
-            scrollable(column(file_rows)).height(Length::Fill),
+            scrollable(column(file_rows))
+                .id(self.scroll_bar_id.clone())
+                .height(Length::Fill),
             Rule::horizontal(1),
         ]
         .into()
@@ -319,24 +325,24 @@ impl ReadPage {
         }
     }
 
-    pub fn first_page(&mut self) {
+    fn first_page(&mut self) {
         self.current_page_index = 0;
         self.load_current_page();
     }
 
-    pub fn last_page(&mut self) {
+    fn last_page(&mut self) {
         self.current_page_index = self.total_pages() - 1;
         self.load_current_page();
     }
 
-    pub fn previous_page(&mut self) {
+    fn previous_page(&mut self) {
         if self.current_page_index > 0 {
             self.current_page_index -= 1;
             self.load_current_page();
         }
     }
 
-    pub fn next_page(&mut self) {
+    fn next_page(&mut self) {
         let total_pages = self.total_pages();
         if self.current_page_index + 1 < total_pages {
             self.current_page_index += 1;
@@ -344,18 +350,18 @@ impl ReadPage {
         }
     }
 
-    pub fn search(&mut self) {
+    fn search(&mut self) {
         self.current_page_index = 0;
         self.load_current_page();
     }
 
-    pub fn clear_search(&mut self) {
+    fn clear_search(&mut self) {
         self.search_query = String::new();
         self.current_page_index = 0;
         self.load_current_page();
     }
 
-    pub fn go_to_page(&mut self) {
+    fn go_to_page(&mut self) {
         if let Ok(query) = self.page_input_value.parse::<usize>() {
             if query > 0 && query <= self.total_pages() {
                 self.current_page_index = query - 1;
@@ -364,18 +370,49 @@ impl ReadPage {
         }
     }
 
-    fn update(&mut self, message: ReadMessage) {
+    fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
         match message {
-            ReadMessage::PrevPage => self.previous_page(),
-            ReadMessage::NextPage => self.next_page(),
-            ReadMessage::SearchSubmit => self.search(),
-            ReadMessage::SearchClear => self.clear_search(),
-            ReadMessage::ContentChanged(content) => self.search_query = content,
-            ReadMessage::FirstPage => self.first_page(),
-            ReadMessage::LastPage => self.last_page(),
-            ReadMessage::PageInputChanged(page_number) => self.page_input_value = page_number,
-            ReadMessage::PageInputSubmit => self.go_to_page(),
+            ReadMessage::PrevPage => {
+                self.previous_page();
+                self.reset_scroll()
+            }
+            ReadMessage::NextPage => {
+                self.next_page();
+                self.reset_scroll()
+            }
+            ReadMessage::SearchSubmit => {
+                self.search();
+                self.reset_scroll()
+            }
+            ReadMessage::SearchClear => {
+                self.clear_search();
+                self.reset_scroll()
+            }
+            ReadMessage::ContentChanged(content) => {
+                self.search_query = content;
+                Task::none()
+            }
+            ReadMessage::FirstPage => {
+                self.first_page();
+                self.reset_scroll()
+            }
+            ReadMessage::LastPage => {
+                self.last_page();
+                self.reset_scroll()
+            }
+            ReadMessage::PageInputChanged(page_number) => {
+                self.page_input_value = page_number;
+                Task::none()
+            }
+            ReadMessage::PageInputSubmit => {
+                self.go_to_page();
+                self.reset_scroll()
+            }
         }
+    }
+
+    fn reset_scroll(&self) -> Task<ReadMessage> {
+        scrollable::snap_to(self.scroll_bar_id.clone(), RelativeOffset::START)
     }
 }
 
@@ -388,8 +425,9 @@ impl WritePage {
         text("Write Page").into()
     }
 
-    fn update(&mut self, message: WriteMessage) {
-        println!("{:?}", message)
+    fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
+        println!("{:?}", message);
+        Task::none()
     }
 }
 
@@ -441,23 +479,25 @@ impl ListerApp {
         column![nav_bar, content].padding(20).into()
     }
 
-    fn update(&mut self, message: AppMessage) {
+    fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
         match &mut self.current_page {
             Page::Read(page) => match message {
                 AppMessage::GoToWrite => {
                     let write_page = WritePage::new(self.service.clone());
-                    self.current_page = Page::Write(write_page)
+                    self.current_page = Page::Write(write_page);
+                    Task::none()
                 }
-                AppMessage::Read(msg) => page.update(msg),
-                _ => {}
+                AppMessage::Read(msg) => page.update(msg).map(AppMessage::Read),
+                _ => Task::none(),
             },
             Page::Write(page) => match message {
                 AppMessage::GoToRead => {
                     let read_page = ReadPage::new(self.service.clone());
                     self.current_page = Page::Read(read_page);
+                    Task::none()
                 }
-                AppMessage::Write(msg) => page.update(msg),
-                _ => {}
+                AppMessage::Write(msg) => page.update(msg).map(AppMessage::Write),
+                _ => Task::none(),
             },
         }
     }
@@ -726,14 +766,14 @@ struct FileWithInfoModel {
 }
 
 impl FileWithInfoModel {
-    pub fn parent_dir(&self) -> String {
+    fn parent_dir(&self) -> String {
         Path::new(&self.path)
             .parent()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| "".to_string())
     }
 
-    pub fn file_name(&self) -> String {
+    fn file_name(&self) -> String {
         Path::new(&self.path)
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
