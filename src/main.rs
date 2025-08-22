@@ -9,11 +9,16 @@ use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, Sql
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
 use iced::widget::scrollable::RelativeOffset;
-use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
+use iced::widget::{
+    button, column, row, scrollable, text, text_input, Button, Column, Rule, TextInput,
+};
 use iced::{Alignment, Element, Length, Task};
-use std::path::Path;
+use rfd::AsyncFileDialog;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use tokio::runtime::Runtime;
+use walkdir::WalkDir;
 
 mod schema;
 
@@ -33,10 +38,12 @@ fn insert_rows() {
 
     let repository = ListerRepository::new(pool);
 
-    repository.add_category(NewFileCategory { name: "Series" });
+    repository.add_category(NewFileCategory {
+        name: "Series".to_string(),
+    });
     repository.add_drive(NewDriveEntry {
         category_id: 1,
-        name: "Windows Drive",
+        name: "Windows Drive".to_string(),
     });
 
     let files: Vec<NewFileEntry> = backing
@@ -44,7 +51,7 @@ fn insert_rows() {
         .enumerate()
         .map(|(i, s)| NewFileEntry {
             drive_id: 1,
-            path: s.as_str(),
+            path: String::from(s),
             weight: 200_000 + (i as i64) * 42,
         })
         .collect();
@@ -90,7 +97,13 @@ enum ReadMessage {
 
 #[derive(Clone, Debug)]
 enum WriteMessage {
-    Ok(usize),
+    CategoryChanged(String),
+    DriveChanged(String),
+    DirectoryPressed,
+    DirectoryChanged(Option<PathBuf>),
+    WriteSubmit,
+    WalkFinished(Vec<FileEntryModel>),
+    InsertFinished,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +128,13 @@ struct ReadPage {
 
 struct WritePage {
     service: Arc<ListerService>,
+    category: String,
+    drive: String,
+    directory: Option<PathBuf>,
+
+    is_walking_directory: bool,
+    is_inserting_in_database: bool,
+    is_finished: bool,
 }
 
 impl ReadPage {
@@ -428,17 +448,182 @@ impl ReadPage {
 
 impl WritePage {
     fn new(service: Arc<ListerService>) -> Self {
-        Self { service }
+        Self {
+            service,
+            category: "".to_string(),
+            drive: "".to_string(),
+            directory: None,
+            is_walking_directory: false,
+            is_inserting_in_database: false,
+            is_finished: false,
+        }
     }
 
     fn view(&'_ self) -> Element<'_, WriteMessage> {
-        text("Write Page").into()
+        let category_input = self.category_input();
+        let drive_input = self.drive_input();
+        let directory_input = Self::directory_input();
+        let submit_button = self.submit_button();
+        let feedback_text = self.feedback_text();
+
+        column![
+            category_input,
+            drive_input,
+            directory_input,
+            submit_button,
+            feedback_text
+        ]
+        .into()
+    }
+
+    fn category_input(&'_ self) -> TextInput<'_, WriteMessage> {
+        text_input("Choose a category", &self.category).on_input(WriteMessage::CategoryChanged)
+    }
+
+    fn drive_input(&'_ self) -> TextInput<'_, WriteMessage> {
+        text_input("Choose a drive", &self.drive).on_input(WriteMessage::DriveChanged)
+    }
+
+    fn directory_input() -> Column<'static, WriteMessage> {
+        column![
+            text("Select a directory"),
+            button("Browse directory").on_press(WriteMessage::DirectoryPressed),
+        ]
+    }
+
+    fn submit_button(&'_ self) -> Button<'_, WriteMessage> {
+        button("Submit").on_press_maybe(
+            if !self.category.is_empty() && !self.drive.is_empty() && self.directory.is_some() {
+                Some(WriteMessage::WriteSubmit)
+            } else {
+                None
+            },
+        )
+    }
+
+    fn feedback_text(&'_ self) -> Element<'_, WriteMessage> {
+        let feedback = if self.is_walking_directory {
+            "Finding files to insert"
+        } else if self.is_inserting_in_database {
+            "Inserting in database"
+        } else if self.is_finished {
+            "Files have been inserted in database"
+        } else {
+            ""
+        };
+        text(feedback).into()
     }
 
     fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
-        println!("{:?}", message);
+        match message {
+            WriteMessage::CategoryChanged(result) => {
+                self.category = result;
+                Task::none()
+            }
+            WriteMessage::DriveChanged(result) => {
+                self.drive = result;
+                Task::none()
+            }
+            WriteMessage::DirectoryPressed => Self::choose_directory(),
+            WriteMessage::DirectoryChanged(result) => {
+                self.directory = result;
+                Task::none()
+            }
+            WriteMessage::WriteSubmit => self.walk_directory(),
+            WriteMessage::WalkFinished(files) => self.insert_in_database(files),
+            WriteMessage::InsertFinished => {
+                self.is_inserting_in_database = false;
+                self.is_finished = true;
+                Task::none()
+            }
+        }
+    }
+
+    fn insert_in_database(&mut self, files: Vec<FileEntryModel>) -> Task<WriteMessage> {
+        self.is_walking_directory = false;
+        self.is_inserting_in_database = true;
+        let category = self.category.clone();
+        let drive = self.drive.clone();
+        let service = self.service.clone();
+        Task::perform(
+            async move {
+                let category_id = service
+                    .add_category(NewFileCategory { name: category })
+                    .await?;
+                let drive_id = service
+                    .add_drive(NewDriveEntry {
+                        category_id,
+                        name: drive,
+                    })
+                    .await?;
+                service.add_files(drive_id, files).await?;
+                Ok::<(), ServiceError>(())
+            },
+            |_| WriteMessage::InsertFinished,
+        )
+    }
+
+    fn walk_directory(&mut self) -> Task<WriteMessage> {
+        self.is_walking_directory = true;
+        if let Some(directory) = self.directory.clone() {
+            return Task::perform(
+                async { walk_directory(directory).await },
+                WriteMessage::WalkFinished,
+            );
+        }
         Task::none()
     }
+
+    fn choose_directory() -> Task<WriteMessage> {
+        Task::perform(
+            async {
+                AsyncFileDialog::new()
+                    .set_title("Select Directory")
+                    .pick_folder()
+                    .await
+                    .map(|handle| handle.path().to_path_buf())
+            },
+            WriteMessage::DirectoryChanged,
+        )
+    }
+}
+
+async fn walk_directory(path: PathBuf) -> Vec<FileEntryModel> {
+    TOKIO_RUNTIME
+        .handle()
+        .spawn_blocking(move || {
+            WalkDir::new(&path)
+                .sort_by_file_name()
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .map(|e| file_info(&path, e.path()))
+                .collect()
+        })
+        .await
+        .unwrap()
+}
+
+fn file_info(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> FileEntryModel {
+    FileEntryModel {
+        path: file_path(chosen_directory_path, absolute_file_path),
+        weight: weight(absolute_file_path),
+    }
+}
+
+fn file_path(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> String {
+    absolute_file_path
+        .strip_prefix(chosen_directory_path)
+        .expect("File not under chosen directory")
+        .to_path_buf()
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub fn weight(path: &Path) -> i64 {
+    fs::metadata(path)
+        .expect("Cannot access file metadata")
+        .len() as i64
 }
 
 struct ListerApp {
@@ -566,7 +751,7 @@ enum RepositoryError {
 type RepositoryResult<T> = Result<T, RepositoryError>;
 
 impl ListerRepository {
-    fn add_category(&self, category: NewFileCategory<'_>) -> RepositoryResult<i32> {
+    fn add_category(&self, category: NewFileCategory) -> RepositoryResult<i32> {
         let mut conn = self.pool.get()?;
         let id = diesel::insert_into(file_categories::table)
             .values(category)
@@ -575,7 +760,7 @@ impl ListerRepository {
         Ok(id)
     }
 
-    fn add_drive(&self, drive: NewDriveEntry<'_>) -> RepositoryResult<i32> {
+    fn add_drive(&self, drive: NewDriveEntry) -> RepositoryResult<i32> {
         let mut conn = self.pool.get()?;
         let id = diesel::insert_into(drive_entries::table)
             .values(drive)
@@ -584,7 +769,7 @@ impl ListerRepository {
         Ok(id)
     }
 
-    fn add_files(&self, files: Vec<NewFileEntry<'_>>) -> RepositoryResult<()> {
+    fn add_files(&self, files: Vec<NewFileEntry>) -> RepositoryResult<()> {
         let mut conn = self.pool.get()?;
         conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
             diesel::insert_into(file_entries::table)
@@ -695,22 +880,28 @@ struct FileWithInfo {
 
 #[derive(Insertable)]
 #[diesel(table_name = file_categories)]
-struct NewFileCategory<'a> {
-    name: &'a str,
+struct NewFileCategory {
+    name: String,
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = drive_entries)]
-struct NewDriveEntry<'a> {
+struct NewDriveEntry {
     category_id: i32,
-    name: &'a str,
+    name: String,
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = file_entries)]
-struct NewFileEntry<'a> {
+struct NewFileEntry {
     drive_id: i32,
-    path: &'a str,
+    path: String,
+    weight: i64,
+}
+
+#[derive(Clone, Debug)]
+struct FileEntryModel {
+    path: String,
     weight: i64,
 }
 
@@ -720,6 +911,16 @@ struct FileWithInfoModel {
     drive_name: String,
     path: String,
     weight: i64,
+}
+
+impl FileEntryModel {
+    fn into_new_file_entry(self, drive_id: i32) -> NewFileEntry {
+        NewFileEntry {
+            drive_id,
+            path: self.path,
+            weight: self.weight,
+        }
+    }
 }
 
 impl FileWithInfoModel {
@@ -764,6 +965,43 @@ struct ListerService {
 impl ListerService {
     fn new(repo: ListerRepository) -> Self {
         ListerService { repo }
+    }
+
+    async fn add_category(&self, category_name: NewFileCategory) -> ServiceResult<i32> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.add_category(category_name))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    async fn add_drive(&self, drive: NewDriveEntry) -> ServiceResult<i32> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.add_drive(drive))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    async fn add_files(&self, drive_id: i32, files: Vec<FileEntryModel>) -> ServiceResult<()> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                repo.add_files(
+                    files
+                        .into_iter()
+                        .map(|f| f.into_new_file_entry(drive_id))
+                        .collect(),
+                )
+            })
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
     }
 
     async fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {

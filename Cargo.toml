@@ -9,8 +9,10 @@ diesel = { version = "*", features = ["r2d2", "returning_clauses_for_sqlite_3_35
 diesel_migrations = "*"
 humansize = "*"
 iced = { version = "*", features = ["system"]}
+rfd = "*"
 thiserror = "*"
 tokio = { version = "*", features = ["rt-multi-thread"]}
+walkdir = "*"
 
 # to have sqlite libraries bundled in windows binary
 libsqlite3-sys = { version = "*", features = ["bundled-windows"] }
