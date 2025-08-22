@@ -4,14 +4,11 @@ use crate::schema::{drive_entries, file_categories, file_entries};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError};
 use diesel::result::Error as DieselError;
-use diesel::ExpressionMethods;
 use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
 use iced::widget::scrollable::RelativeOffset;
-use iced::widget::{
-    button, column, row, scrollable, text, text_input, Rule,
-};
+use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
 use iced::{Alignment, Element, Length, Task};
 use rfd::AsyncFileDialog;
 use std::fs;
@@ -38,13 +35,17 @@ fn insert_rows() {
 
     let repository = ListerRepository::new(pool);
 
-    repository.add_category(NewFileCategory {
-        name: "Series".to_string(),
-    });
-    repository.add_drive(NewDriveEntry {
-        category_id: 1,
-        name: "Windows Drive".to_string(),
-    });
+    repository
+        .add_category(NewFileCategory {
+            name: "Series".to_string(),
+        })
+        .expect("add_category failed");
+    repository
+        .add_drive(NewDriveEntry {
+            category_id: 1,
+            name: "Windows Drive".to_string(),
+        })
+        .expect("add_drive failed");
 
     let files: Vec<NewFileEntry> = backing
         .iter()
@@ -55,7 +56,7 @@ fn insert_rows() {
             weight: 200_000 + (i as i64) * 42,
         })
         .collect();
-    repository.add_files(files);
+    repository.add_files(files).expect("add_files failed");
 }
 
 static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
@@ -98,7 +99,9 @@ enum ReadMessage {
 #[derive(Clone, Debug)]
 enum WriteMessage {
     CategoryChanged(String),
+    CategorySubmit,
     DriveChanged(String),
+    DriveSubmit,
     DirectoryPressed,
     DirectoryChanged(Option<PathBuf>),
     WriteSubmit,
@@ -124,6 +127,7 @@ struct ReadPage {
     current_page_index: usize,
 
     active_task_id: u64,
+    search_input_id: text_input::Id,
     scroll_bar_id: scrollable::Id,
 }
 
@@ -136,6 +140,8 @@ struct WritePage {
     is_walking_directory: bool,
     is_inserting_in_database: bool,
     is_finished: bool,
+    category_input_id: text_input::Id,
+    drive_input_id: text_input::Id,
 }
 
 impl ReadPage {
@@ -150,6 +156,7 @@ impl ReadPage {
             total_count: 0,
             current_page_index: 0,
             active_task_id: 0,
+            search_input_id: text_input::Id::unique(),
             scroll_bar_id: scrollable::Id::unique(),
         };
         let task = page.load_current_page();
@@ -220,6 +227,7 @@ impl ReadPage {
 
     fn search_section(&'_ self) -> Element<'_, ReadMessage> {
         let search_input = text_input("Search files across all drives...", &self.search_query)
+            .id(self.search_input_id.clone())
             .on_input(ReadMessage::ContentChanged)
             .on_submit(ReadMessage::SearchSubmit)
             .padding(10)
@@ -428,11 +436,12 @@ impl ReadPage {
     }
 
     fn files_loaded(&mut self, task_id: u64, result: PaginatedFiles) -> Task<ReadMessage> {
-        if task_id == self.active_task_id {
+        let task = if task_id == self.active_task_id {
             self.process_loaded_files(result)
         } else {
             Task::none()
-        }
+        };
+        task.chain(text_input::focus(self.search_input_id.clone()))
     }
 
     fn process_loaded_files(&mut self, result: PaginatedFiles) -> Task<ReadMessage> {
@@ -454,8 +463,9 @@ impl ReadPage {
 }
 
 impl WritePage {
-    fn new(service: Arc<ListerService>) -> Self {
-        Self {
+    fn new(service: Arc<ListerService>) -> (Self, Task<WriteMessage>) {
+        let category_input_id = text_input::Id::unique();
+        let page = Self {
             service,
             category: "".to_string(),
             drive: "".to_string(),
@@ -463,7 +473,10 @@ impl WritePage {
             is_walking_directory: false,
             is_inserting_in_database: false,
             is_finished: false,
-        }
+            category_input_id: category_input_id.clone(),
+            drive_input_id: text_input::Id::unique(),
+        };
+        (page, text_input::focus(category_input_id))
     }
 
     fn view(&'_ self) -> Element<'_, WriteMessage> {
@@ -483,6 +496,8 @@ impl WritePage {
             &self.category,
         )
         .on_input(WriteMessage::CategoryChanged)
+        .id(self.category_input_id.clone())
+        .on_submit(WriteMessage::CategorySubmit)
         .padding(10)
         .width(Length::Fill);
 
@@ -491,6 +506,8 @@ impl WritePage {
             &self.drive,
         )
         .on_input(WriteMessage::DriveChanged)
+        .id(self.drive_input_id.clone())
+        .on_submit(WriteMessage::DriveSubmit)
         .padding(10)
         .width(Length::Fill);
 
@@ -612,7 +629,9 @@ impl WritePage {
     fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
         match message {
             WriteMessage::CategoryChanged(result) => self.category_changed(result),
+            WriteMessage::CategorySubmit => self.category_submit(),
             WriteMessage::DriveChanged(result) => self.drive_changed(result),
+            WriteMessage::DriveSubmit => self.drive_submit(),
             WriteMessage::DirectoryPressed => Self::choose_directory(),
             WriteMessage::DirectoryChanged(result) => self.directory_changed(result),
             WriteMessage::WriteSubmit => self.walk_directory(),
@@ -627,9 +646,17 @@ impl WritePage {
         Task::none()
     }
 
+    fn category_submit(&mut self) -> Task<WriteMessage> {
+        text_input::focus(self.drive_input_id.clone())
+    }
+
     fn drive_changed(&mut self, result: String) -> Task<WriteMessage> {
         self.drive = result;
         Task::none()
+    }
+
+    fn drive_submit(&mut self) -> Task<WriteMessage> {
+        text_input::focus(self.category_input_id.clone())
     }
 
     fn choose_directory() -> Task<WriteMessage> {
@@ -698,7 +725,7 @@ impl WritePage {
         self.is_walking_directory = false;
         self.is_inserting_in_database = false;
         self.is_finished = false;
-        Task::none()
+        text_input::focus(self.category_input_id.clone())
     }
 }
 
@@ -806,9 +833,9 @@ impl ListerApp {
     }
 
     fn init_write_page(&mut self) -> Task<AppMessage> {
-        let write_page = WritePage::new(self.service.clone());
+        let (write_page, task) = WritePage::new(self.service.clone());
         self.current_page = Page::Write(write_page);
-        Task::none()
+        task.map(AppMessage::Write)
     }
 
     fn init_read_page(&mut self) -> Task<AppMessage> {
