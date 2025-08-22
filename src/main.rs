@@ -58,7 +58,7 @@ static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 });
 
 fn main() -> iced::Result {
-    iced::run("Lister", ListerApp::update, ListerApp::view)
+    iced::application("Lister", ListerApp::update, ListerApp::view).run_with(|| ListerApp::new())
 }
 
 #[derive(Clone, Debug)]
@@ -117,8 +117,8 @@ struct WritePage {
 }
 
 impl ReadPage {
-    fn new(service: Arc<ListerService>) -> Self {
-         Self {
+    fn new(service: Arc<ListerService>) -> (Self, Task<ReadMessage>) {
+        let mut page = Self {
             service,
             search_query: String::new(),
             current_files: Vec::new(),
@@ -128,7 +128,9 @@ impl ReadPage {
             total_count: 0,
             current_page_index: 0,
             scroll_bar_id: scrollable::Id::unique(),
-        }
+        };
+        let task = page.load_current_page();
+        (page, task)
     }
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {
@@ -421,22 +423,24 @@ struct ListerApp {
     current_page: Page,
 }
 
-impl Default for ListerApp {
-    fn default() -> Self {
-        let service = init_back_end();
-        Self {
-            service: service.clone(),
-            current_page: Page::Read(ReadPage::new(service)),
-        }
-    }
-}
-
 fn init_back_end() -> Arc<ListerService> {
     let pool = get_connection_pool("app.db");
     Arc::new(ListerService::new(ListerRepository::new(pool)))
 }
 
 impl ListerApp {
+    fn new() -> (Self, Task<AppMessage>) {
+        let service = init_back_end();
+        let (page, task) = ReadPage::new(service.clone());
+        (
+            Self {
+                service,
+                current_page: Page::Read(page),
+            },
+            task.map(AppMessage::Read),
+        )
+    }
+
     fn view(&'_ self) -> Element<'_, AppMessage> {
         let nav_bar = row![
             button(text("Read").align_x(Alignment::Center))
@@ -477,8 +481,7 @@ impl ListerApp {
             },
             Page::Write(page) => match message {
                 AppMessage::GoToRead => {
-                    let mut page = ReadPage::new(self.service.clone());
-                    let task = page.load_current_page();
+                    let (page, task) = ReadPage::new(self.service.clone());
                     self.current_page = Page::Read(page);
                     task.map(AppMessage::Read)
                 }
