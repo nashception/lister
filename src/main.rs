@@ -18,6 +18,7 @@ mod schema;
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
 const ITEMS_PER_PAGE: usize = 100;
+const CACHED_SIZE: i64 = 10000;
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 
@@ -84,14 +85,16 @@ enum WriteMessage {
 }
 
 struct PaginatedFiles {
-    files: Vec<FileWithInfo>,
+    files: Vec<FileWithInfoModel>,
     total_count: i64,
 }
 
 struct ReadPage {
     service: Arc<ListerService>,
     search_query: String,
-    current_files: Vec<FileWithInfo>,
+    current_files: Vec<FileWithInfoModel>,
+    cached_query: Option<String>,
+    cached_results: Option<Vec<FileWithInfoModel>>,
     page_input_value: String,
     total_count: i64,
     current_page_index: usize,
@@ -107,7 +110,9 @@ impl ReadPage {
             service,
             search_query: String::new(),
             current_files: Vec::new(),
-            page_input_value : String::new(),
+            cached_query: None,
+            cached_results: None,
+            page_input_value: String::new(),
             total_count: 0,
             current_page_index: 0,
         };
@@ -116,20 +121,50 @@ impl ReadPage {
     }
 
     fn load_current_page(&mut self) {
-        let offset = (self.current_page_index * ITEMS_PER_PAGE) as i64;
-        let limit = ITEMS_PER_PAGE as i64;
+        if let (Some(cached), Some(query)) = (&self.cached_results, &self.cached_query) {
+            if *query == self.search_query {
+                let start = self.current_page_index * ITEMS_PER_PAGE;
+                let end = (start + ITEMS_PER_PAGE).min(cached.len());
+                self.current_files = cached[start..end].to_vec();
+                self.total_count = cached.len() as i64;
+                return;
+            }
+        }
 
+        let offset = (self.current_page_index * ITEMS_PER_PAGE) as i64;
         let result = if self.search_query.is_empty() {
+            let limit = ITEMS_PER_PAGE as i64;
             self.service.find_files_paginated(offset, limit)
         } else {
-            self.service
-                .search_files_paginated(&self.search_query, offset, limit)
+            let count = self.service.get_search_count(&self.search_query).unwrap();
+            if count <= CACHED_SIZE {
+                self.service
+                    .search_files_paginated(&self.search_query, 0, count)
+            } else {
+                self.service.search_files_paginated(
+                    &self.search_query,
+                    offset,
+                    ITEMS_PER_PAGE as i64,
+                )
+            }
         };
 
         match result {
             Ok(paginated) => {
-                self.current_files = paginated.files;
-                self.total_count = paginated.total_count;
+                if paginated.total_count <= CACHED_SIZE && !self.search_query.is_empty() {
+                    self.cached_results = Some(paginated.files.clone());
+                    self.cached_query = Some(self.search_query.clone());
+
+                    let start = self.current_page_index * ITEMS_PER_PAGE;
+                    let end = (start + ITEMS_PER_PAGE).min(paginated.files.len());
+                    self.current_files = paginated.files[start..end].to_vec();
+                    self.total_count = paginated.files.len() as i64;
+                } else {
+                    self.current_files = paginated.files;
+                    self.total_count = paginated.total_count;
+                    self.cached_results = None;
+                    self.cached_query = None;
+                }
             }
             Err(e) => {
                 eprintln!("Error loading files: {:?}", e);
@@ -257,26 +292,23 @@ impl ReadPage {
                 button::text
             });
 
-        let page_input = text_input(
-            "Page #",
-            &self.page_input_value,
-        )
+        let page_input = text_input("Page #", &self.page_input_value)
             .on_input(ReadMessage::PageInputChanged)
             .on_submit(ReadMessage::PageInputSubmit)
             .padding(8)
             .width(Length::Fixed(100f32));
 
         row![
-        first_button,
-        prev_button,
-        page_info,
-        next_button,
-        last_button,
-        page_input,
-    ]
-            .spacing(20)
-            .align_y(Alignment::Center)
-            .into()
+            first_button,
+            prev_button,
+            page_info,
+            next_button,
+            last_button,
+            page_input,
+        ]
+        .spacing(20)
+        .align_y(Alignment::Center)
+        .into()
     }
 
     fn total_pages(&self) -> usize {
@@ -285,6 +317,16 @@ impl ReadPage {
         } else {
             ((self.total_count as usize) + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE
         }
+    }
+
+    pub fn first_page(&mut self) {
+        self.current_page_index = 0;
+        self.load_current_page();
+    }
+
+    pub fn last_page(&mut self) {
+        self.current_page_index = self.total_pages() - 1;
+        self.load_current_page();
     }
 
     pub fn previous_page(&mut self) {
@@ -329,10 +371,10 @@ impl ReadPage {
             ReadMessage::SearchSubmit => self.search(),
             ReadMessage::SearchClear => self.clear_search(),
             ReadMessage::ContentChanged(content) => self.search_query = content,
-            ReadMessage::FirstPage => self.current_page_index = 0,
-            ReadMessage::LastPage => self.current_page_index = self.total_pages() - 1,
+            ReadMessage::FirstPage => self.first_page(),
+            ReadMessage::LastPage => self.last_page(),
             ReadMessage::PageInputChanged(page_number) => self.page_input_value = page_number,
-            ReadMessage::PageInputSubmit => self.go_to_page()
+            ReadMessage::PageInputSubmit => self.go_to_page(),
         }
     }
 }
@@ -561,7 +603,7 @@ impl ListerRepository {
 
         let total_count: i64 = file_entries::table.count().get_result(&mut conn)?;
 
-        let files = file_entries::table
+        let entities = file_entries::table
             .inner_join(drive_entries::table.inner_join(file_categories::table))
             .select((
                 file_categories::name,
@@ -571,7 +613,9 @@ impl ListerRepository {
             ))
             .limit(limit)
             .offset(offset)
-            .load(&mut conn)?;
+            .load::<FileWithInfo>(&mut conn)?;
+
+        let files = entities.into_iter().map(|e| e.into()).collect();
 
         Ok(PaginatedFiles { files, total_count })
     }
@@ -590,7 +634,7 @@ impl ListerRepository {
             .count()
             .get_result(&mut conn)?;
 
-        let files = file_entries::table
+        let entities = file_entries::table
             .inner_join(drive_entries::table.inner_join(file_categories::table))
             .select((
                 file_categories::name,
@@ -601,9 +645,20 @@ impl ListerRepository {
             .filter(file_entries::path.like(&search_pattern))
             .limit(limit)
             .offset(offset)
-            .load(&mut conn)?;
+            .load::<FileWithInfo>(&mut conn)?;
 
+        let files = entities.into_iter().map(|e| e.into()).collect();
         Ok(PaginatedFiles { files, total_count })
+    }
+
+    fn get_search_count(&self, search_query: &str) -> RepositoryResult<i64> {
+        let mut conn = self.pool.get()?;
+        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
+        let count = file_entries::table
+            .filter(file_entries::path.like(&search_pattern))
+            .count()
+            .get_result(&mut conn)?;
+        Ok(count)
     }
 }
 
@@ -662,7 +717,15 @@ struct NewFileEntry<'a> {
     weight: i64,
 }
 
-impl FileWithInfo {
+#[derive(Clone)]
+struct FileWithInfoModel {
+    category_name: String,
+    drive_name: String,
+    path: String,
+    weight: i64,
+}
+
+impl FileWithInfoModel {
     pub fn parent_dir(&self) -> String {
         Path::new(&self.path)
             .parent()
@@ -675,6 +738,17 @@ impl FileWithInfo {
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
             .unwrap_or_else(|| "".to_string())
+    }
+}
+
+impl From<FileWithInfo> for FileWithInfoModel {
+    fn from(value: FileWithInfo) -> Self {
+        Self {
+            category_name: value.category_name,
+            drive_name: value.drive_name,
+            path: value.path,
+            weight: value.weight,
+        }
     }
 }
 
@@ -711,5 +785,10 @@ impl ListerService {
             .repo
             .search_files_paginated(search_query, offset, limit)?;
         Ok(paginated)
+    }
+
+    fn get_search_count(&self, search_query: &str) -> ServiceResult<i64> {
+        let count = self.repo.get_search_count(search_query)?;
+        Ok(count)
     }
 }
