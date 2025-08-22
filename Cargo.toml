@@ -10,6 +10,7 @@ diesel_migrations = "*"
 humansize = "*"
 iced = { version = "*", features = ["system"]}
 thiserror = "*"
+tokio = { version = "*", features = ["rt-multi-thread"]}
 
 # to have sqlite libraries bundled in windows binary
 libsqlite3-sys = { version = "*", features = ["bundled-windows"] }

@@ -12,7 +12,8 @@ use iced::widget::scrollable::RelativeOffset;
 use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
 use iced::{Alignment, Element, Length, Task};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use tokio::runtime::Runtime;
 
 mod schema;
 
@@ -50,6 +51,12 @@ fn insert_rows() {
     repository.add_files(files);
 }
 
+static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .build()
+        .expect("failed to build Tokio runtime")
+});
+
 fn main() -> iced::Result {
     iced::run("Lister", ListerApp::update, ListerApp::view)
 }
@@ -78,6 +85,7 @@ enum ReadMessage {
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
+    FilesLoaded(PaginatedFiles),
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +93,7 @@ enum WriteMessage {
     Ok(usize),
 }
 
+#[derive(Clone, Debug)]
 struct PaginatedFiles {
     files: Vec<FileWithInfoModel>,
     total_count: i64,
@@ -109,7 +118,7 @@ struct WritePage {
 
 impl ReadPage {
     fn new(service: Arc<ListerService>) -> Self {
-        let mut page = Self {
+         Self {
             service,
             search_query: String::new(),
             current_files: Vec::new(),
@@ -119,63 +128,43 @@ impl ReadPage {
             total_count: 0,
             current_page_index: 0,
             scroll_bar_id: scrollable::Id::unique(),
-        };
-        page.load_current_page();
-        page
+        }
     }
 
-    fn load_current_page(&mut self) {
+    fn load_current_page(&mut self) -> Task<ReadMessage> {
         if let (Some(cached), Some(query)) = (&self.cached_results, &self.cached_query) {
             if *query == self.search_query {
                 let start = self.current_page_index * ITEMS_PER_PAGE;
                 let end = (start + ITEMS_PER_PAGE).min(cached.len());
                 self.current_files = cached[start..end].to_vec();
                 self.total_count = cached.len() as i64;
-                return;
+                return Task::none();
             }
         }
 
         let offset = (self.current_page_index * ITEMS_PER_PAGE) as i64;
-        let result = if self.search_query.is_empty() {
-            let limit = ITEMS_PER_PAGE as i64;
-            self.service.find_files_paginated(offset, limit)
-        } else {
-            let count = self.service.get_search_count(&self.search_query).unwrap();
-            if count <= CACHED_SIZE {
-                self.service
-                    .search_files_paginated(&self.search_query, 0, count)
-            } else {
-                self.service.search_files_paginated(
-                    &self.search_query,
-                    offset,
-                    ITEMS_PER_PAGE as i64,
-                )
-            }
-        };
+        let query = self.search_query.clone();
+        let service = self.service.clone();
 
-        match result {
-            Ok(paginated) => {
-                if paginated.total_count <= CACHED_SIZE && !self.search_query.is_empty() {
-                    self.cached_results = Some(paginated.files.clone());
-                    self.cached_query = Some(self.search_query.clone());
-
-                    let start = self.current_page_index * ITEMS_PER_PAGE;
-                    let end = (start + ITEMS_PER_PAGE).min(paginated.files.len());
-                    self.current_files = paginated.files[start..end].to_vec();
-                    self.total_count = paginated.files.len() as i64;
+        Task::perform(
+            async move {
+                if query.is_empty() {
+                    service
+                        .find_files_paginated(offset, ITEMS_PER_PAGE as i64)
+                        .await
                 } else {
-                    self.current_files = paginated.files;
-                    self.total_count = paginated.total_count;
-                    self.cached_results = None;
-                    self.cached_query = None;
+                    let count = service.get_search_count(&query).await?;
+                    if count <= CACHED_SIZE {
+                        service.search_files_paginated(&query, 0, count).await
+                    } else {
+                        service
+                            .search_files_paginated(&query, offset, ITEMS_PER_PAGE as i64)
+                            .await
+                    }
                 }
-            }
-            Err(e) => {
-                eprintln!("Error loading files: {:?}", e);
-                self.current_files = Vec::new();
-                self.total_count = 0;
-            }
-        }
+            },
+            |r| ReadMessage::FilesLoaded(r.unwrap()),
+        )
     }
 
     fn view(&'_ self) -> Element<'_, ReadMessage> {
@@ -325,93 +314,89 @@ impl ReadPage {
         }
     }
 
-    fn first_page(&mut self) {
+    fn first_page(&mut self) -> Task<ReadMessage> {
         self.current_page_index = 0;
-        self.load_current_page();
+        self.load_current_page()
     }
 
-    fn last_page(&mut self) {
+    fn last_page(&mut self) -> Task<ReadMessage> {
         self.current_page_index = self.total_pages() - 1;
-        self.load_current_page();
+        self.load_current_page()
     }
 
-    fn previous_page(&mut self) {
+    fn previous_page(&mut self) -> Task<ReadMessage> {
         if self.current_page_index > 0 {
             self.current_page_index -= 1;
-            self.load_current_page();
+            return self.load_current_page();
         }
+        Task::none()
     }
 
-    fn next_page(&mut self) {
+    fn next_page(&mut self) -> Task<ReadMessage> {
         let total_pages = self.total_pages();
         if self.current_page_index + 1 < total_pages {
             self.current_page_index += 1;
-            self.load_current_page();
+            return self.load_current_page();
         }
+        Task::none()
     }
 
-    fn search(&mut self) {
+    fn search(&mut self) -> Task<ReadMessage> {
         self.current_page_index = 0;
-        self.load_current_page();
+        self.load_current_page()
     }
 
-    fn clear_search(&mut self) {
+    fn clear_search(&mut self) -> Task<ReadMessage> {
         self.search_query = String::new();
         self.current_page_index = 0;
-        self.load_current_page();
+        self.load_current_page()
     }
 
-    fn go_to_page(&mut self) {
+    fn go_to_page(&mut self) -> Task<ReadMessage> {
         if let Ok(query) = self.page_input_value.parse::<usize>() {
             if query > 0 && query <= self.total_pages() {
                 self.current_page_index = query - 1;
-                self.load_current_page();
+                return self.load_current_page();
             }
         }
+        Task::none()
     }
 
     fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
         match message {
-            ReadMessage::PrevPage => {
-                self.previous_page();
-                self.reset_scroll()
-            }
-            ReadMessage::NextPage => {
-                self.next_page();
-                self.reset_scroll()
-            }
-            ReadMessage::SearchSubmit => {
-                self.search();
-                self.reset_scroll()
-            }
-            ReadMessage::SearchClear => {
-                self.clear_search();
-                self.reset_scroll()
-            }
+            ReadMessage::PrevPage => self.previous_page(),
+            ReadMessage::NextPage => self.next_page(),
+            ReadMessage::SearchSubmit => self.search(),
+            ReadMessage::SearchClear => self.clear_search(),
             ReadMessage::ContentChanged(content) => {
                 self.search_query = content;
                 Task::none()
             }
-            ReadMessage::FirstPage => {
-                self.first_page();
-                self.reset_scroll()
-            }
-            ReadMessage::LastPage => {
-                self.last_page();
-                self.reset_scroll()
-            }
+            ReadMessage::FirstPage => self.first_page(),
+            ReadMessage::LastPage => self.last_page(),
             ReadMessage::PageInputChanged(page_number) => {
                 self.page_input_value = page_number;
                 Task::none()
             }
-            ReadMessage::PageInputSubmit => {
-                self.go_to_page();
-                self.reset_scroll()
-            }
+            ReadMessage::PageInputSubmit => self.go_to_page(),
+            ReadMessage::FilesLoaded(result) => self.process_loaded_files(result),
         }
     }
 
-    fn reset_scroll(&self) -> Task<ReadMessage> {
+    fn process_loaded_files(&mut self, result: PaginatedFiles) -> Task<ReadMessage> {
+        if result.total_count <= CACHED_SIZE && !self.search_query.is_empty() {
+            self.cached_results = Some(result.files.clone());
+            self.cached_query = Some(self.search_query.clone());
+            let start = self.current_page_index * ITEMS_PER_PAGE;
+            let end = (start + ITEMS_PER_PAGE).min(result.files.len());
+            self.current_files = result.files[start..end].to_vec();
+            self.total_count = result.files.len() as i64;
+        } else {
+            self.current_files = result.files;
+            self.total_count = result.total_count;
+            self.cached_results = None;
+            self.cached_query = None;
+        }
         scrollable::snap_to(self.scroll_bar_id.clone(), RelativeOffset::START)
     }
 }
@@ -492,9 +477,10 @@ impl ListerApp {
             },
             Page::Write(page) => match message {
                 AppMessage::GoToRead => {
-                    let read_page = ReadPage::new(self.service.clone());
-                    self.current_page = Page::Read(read_page);
-                    Task::none()
+                    let mut page = ReadPage::new(self.service.clone());
+                    let task = page.load_current_page();
+                    self.current_page = Page::Read(page);
+                    task.map(AppMessage::Read)
                 }
                 AppMessage::Write(msg) => page.update(msg).map(AppMessage::Write),
                 _ => Task::none(),
@@ -530,61 +516,6 @@ fn run_migrations(pool: &DieselPool) {
     conn.run_pending_migrations(MIGRATIONS)
         .expect("Migration failed");
 }
-
-// #[test]
-// fn lister_repository_with_database() {
-//     let pool = get_connection_pool("file:memdb1?mode=memory&cache=shared");
-//
-//     let new_cat = NewFileCategory { name: "Cat Videos" };
-//     let another_new_cat = NewFileCategory { name: "Games" };
-//     let new_drive = NewDriveEntry {
-//         category_id: 2,
-//         name: "Windows Drive",
-//     };
-//     let another_new_drive = NewDriveEntry {
-//         category_id: 2,
-//         name: "Linux Drive",
-//     };
-//     let lister_repository = ListerRepository::new(pool);
-//
-//     let new_category_id = lister_repository.add_category(new_cat).unwrap();
-//     let another_new_category_id = lister_repository.add_category(another_new_cat).unwrap();
-//
-//     let rows = lister_repository.find_all_categories().unwrap();
-//
-//     let expected = vec![
-//         FileCategoryEntity {
-//             id: new_category_id,
-//             name: "Cat Videos".into(),
-//         },
-//         FileCategoryEntity {
-//             id: another_new_category_id,
-//             name: "Games".into(),
-//         },
-//     ];
-//
-//     assert_eq!(rows, expected);
-//
-//     let new_drive_id = lister_repository.add_drive(new_drive).unwrap();
-//     let another_new_drive_id = lister_repository.add_drive(another_new_drive).unwrap();
-//
-//     let rows = lister_repository.find_all_drives_by_category_id(2).unwrap();
-//
-//     let expected = vec![
-//         DriveEntryEntity {
-//             id: new_drive_id,
-//             category_id: 2,
-//             name: "Windows Drive".into(),
-//         },
-//         DriveEntryEntity {
-//             id: another_new_drive_id,
-//             category_id: 2,
-//             name: "Linux Drive".into(),
-//         },
-//     ];
-//
-//     assert_eq!(rows, expected);
-// }
 
 #[derive(Clone)]
 struct ListerRepository {
@@ -757,7 +688,7 @@ struct NewFileEntry<'a> {
     weight: i64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FileWithInfoModel {
     category_name: String,
     drive_name: String,
@@ -810,25 +741,40 @@ impl ListerService {
         ListerService { repo }
     }
 
-    fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {
-        let paginated = self.repo.find_files_paginated(offset, limit)?;
-        Ok(paginated)
+    async fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.find_files_paginated(offset, limit))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
     }
 
-    fn search_files_paginated(
+    async fn search_files_paginated(
         &self,
         search_query: &str,
         offset: i64,
         limit: i64,
     ) -> ServiceResult<PaginatedFiles> {
-        let paginated = self
-            .repo
-            .search_files_paginated(search_query, offset, limit)?;
-        Ok(paginated)
+        let repo = self.repo.clone();
+        let query = search_query.to_string();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.search_files_paginated(&query, offset, limit))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
     }
 
-    fn get_search_count(&self, search_query: &str) -> ServiceResult<i64> {
-        let count = self.repo.get_search_count(search_query)?;
-        Ok(count)
+    async fn get_search_count(&self, search_query: &str) -> ServiceResult<i64> {
+        let repo = self.repo.clone();
+        let query = search_query.to_string();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.get_search_count(&query))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
     }
 }
