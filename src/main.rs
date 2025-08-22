@@ -85,7 +85,7 @@ enum ReadMessage {
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
-    FilesLoaded(PaginatedFiles),
+    FilesLoaded((u64, PaginatedFiles)),
 }
 
 #[derive(Clone, Debug)]
@@ -109,6 +109,7 @@ struct ReadPage {
     total_count: i64,
     current_page_index: usize,
 
+    active_task_id: u64,
     scroll_bar_id: scrollable::Id,
 }
 
@@ -127,6 +128,7 @@ impl ReadPage {
             page_input_value: String::new(),
             total_count: 0,
             current_page_index: 0,
+            active_task_id: 0,
             scroll_bar_id: scrollable::Id::unique(),
         };
         let task = page.load_current_page();
@@ -144,28 +146,43 @@ impl ReadPage {
             }
         }
 
-        let offset = (self.current_page_index * ITEMS_PER_PAGE) as i64;
-        let query = self.search_query.clone();
+        self.active_task_id += 1;
+        let task_id = self.active_task_id;
+        let search_query = self.search_query.clone();
         let service = self.service.clone();
+        let offset = (self.current_page_index * ITEMS_PER_PAGE) as i64;
 
         Task::perform(
             async move {
-                if query.is_empty() {
+                let result: ServiceResult<PaginatedFiles> = if search_query.is_empty() {
                     service
                         .find_files_paginated(offset, ITEMS_PER_PAGE as i64)
                         .await
                 } else {
-                    let count = service.get_search_count(&query).await?;
-                    if count <= CACHED_SIZE {
-                        service.search_files_paginated(&query, 0, count).await
-                    } else {
-                        service
-                            .search_files_paginated(&query, offset, ITEMS_PER_PAGE as i64)
-                            .await
+                    match service.get_search_count(&search_query).await {
+                        Ok(count) => {
+                            if count <= CACHED_SIZE {
+                                service
+                                    .search_files_paginated(&search_query, 0, count)
+                                    .await
+                            } else {
+                                service
+                                    .search_files_paginated(
+                                        &search_query,
+                                        offset,
+                                        ITEMS_PER_PAGE as i64,
+                                    )
+                                    .await
+                            }
+                        }
+                        Err(e) => Err(e),
                     }
-                }
+                };
+                (task_id, result)
             },
-            |r| ReadMessage::FilesLoaded(r.unwrap()),
+            |(finished_task_id, result)| {
+                ReadMessage::FilesLoaded((finished_task_id, result.unwrap()))
+            },
         )
     }
 
@@ -381,7 +398,13 @@ impl ReadPage {
                 Task::none()
             }
             ReadMessage::PageInputSubmit => self.go_to_page(),
-            ReadMessage::FilesLoaded(result) => self.process_loaded_files(result),
+            ReadMessage::FilesLoaded((task_id, result)) => {
+                if task_id == self.active_task_id {
+                    self.process_loaded_files(result)
+                } else {
+                    Task::none()
+                }
+            }
         }
     }
 
@@ -734,7 +757,6 @@ enum ServiceError {
 
 type ServiceResult<T> = Result<T, ServiceError>;
 
-#[derive(Clone)]
 struct ListerService {
     repo: ListerRepository,
 }
