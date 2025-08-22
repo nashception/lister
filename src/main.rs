@@ -10,7 +10,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
 use iced::widget::scrollable::RelativeOffset;
 use iced::widget::{
-    button, column, row, scrollable, text, text_input, Button, Column, Rule, TextInput,
+    button, column, row, scrollable, text, text_input, Rule,
 };
 use iced::{Alignment, Element, Length, Task};
 use rfd::AsyncFileDialog;
@@ -104,6 +104,7 @@ enum WriteMessage {
     WriteSubmit,
     WalkFinished(Vec<FileEntryModel>),
     InsertFinished,
+    ResetForm,
 }
 
 #[derive(Clone, Debug)]
@@ -353,14 +354,19 @@ impl ReadPage {
         }
     }
 
-    fn first_page(&mut self) -> Task<ReadMessage> {
-        self.current_page_index = 0;
-        self.load_current_page()
-    }
-
-    fn last_page(&mut self) -> Task<ReadMessage> {
-        self.current_page_index = self.total_pages() - 1;
-        self.load_current_page()
+    fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
+        match message {
+            ReadMessage::PrevPage => self.previous_page(),
+            ReadMessage::NextPage => self.next_page(),
+            ReadMessage::SearchSubmit => self.search(),
+            ReadMessage::SearchClear => self.clear_search(),
+            ReadMessage::ContentChanged(content) => self.content_changed(content),
+            ReadMessage::FirstPage => self.first_page(),
+            ReadMessage::LastPage => self.last_page(),
+            ReadMessage::PageInputChanged(page_number) => self.page_input_changed(page_number),
+            ReadMessage::PageInputSubmit => self.go_to_page(),
+            ReadMessage::FilesLoaded((task_id, result)) => self.files_loaded(task_id, result),
+        }
     }
 
     fn previous_page(&mut self) -> Task<ReadMessage> {
@@ -391,6 +397,26 @@ impl ReadPage {
         self.load_current_page()
     }
 
+    fn content_changed(&mut self, content: String) -> Task<ReadMessage> {
+        self.search_query = content;
+        Task::none()
+    }
+
+    fn first_page(&mut self) -> Task<ReadMessage> {
+        self.current_page_index = 0;
+        self.load_current_page()
+    }
+
+    fn last_page(&mut self) -> Task<ReadMessage> {
+        self.current_page_index = self.total_pages() - 1;
+        self.load_current_page()
+    }
+
+    fn page_input_changed(&mut self, page_number: String) -> Task<ReadMessage> {
+        self.page_input_value = page_number;
+        Task::none()
+    }
+
     fn go_to_page(&mut self) -> Task<ReadMessage> {
         if let Ok(query) = self.page_input_value.parse::<usize>() {
             if query > 0 && query <= self.total_pages() {
@@ -401,30 +427,11 @@ impl ReadPage {
         Task::none()
     }
 
-    fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
-        match message {
-            ReadMessage::PrevPage => self.previous_page(),
-            ReadMessage::NextPage => self.next_page(),
-            ReadMessage::SearchSubmit => self.search(),
-            ReadMessage::SearchClear => self.clear_search(),
-            ReadMessage::ContentChanged(content) => {
-                self.search_query = content;
-                Task::none()
-            }
-            ReadMessage::FirstPage => self.first_page(),
-            ReadMessage::LastPage => self.last_page(),
-            ReadMessage::PageInputChanged(page_number) => {
-                self.page_input_value = page_number;
-                Task::none()
-            }
-            ReadMessage::PageInputSubmit => self.go_to_page(),
-            ReadMessage::FilesLoaded((task_id, result)) => {
-                if task_id == self.active_task_id {
-                    self.process_loaded_files(result)
-                } else {
-                    Task::none()
-                }
-            }
+    fn files_loaded(&mut self, task_id: u64, result: PaginatedFiles) -> Task<ReadMessage> {
+        if task_id == self.active_task_id {
+            self.process_loaded_files(result)
+        } else {
+            Task::none()
         }
     }
 
@@ -460,83 +467,198 @@ impl WritePage {
     }
 
     fn view(&'_ self) -> Element<'_, WriteMessage> {
-        let category_input = self.category_input();
-        let drive_input = self.drive_input();
-        let directory_input = Self::directory_input();
-        let submit_button = self.submit_button();
-        let feedback_text = self.feedback_text();
+        let form_section = self.create_form_section();
+        let action_section = self.create_action_section();
+        let status_section = self.create_status_section();
+
+        column![form_section, action_section, status_section]
+            .spacing(20)
+            .padding(20)
+            .into()
+    }
+
+    fn create_form_section(&'_ self) -> Element<'_, WriteMessage> {
+        let category_input = text_input(
+            "Enter category name (e.g., Movies, Documents, Music)",
+            &self.category,
+        )
+        .on_input(WriteMessage::CategoryChanged)
+        .padding(10)
+        .width(Length::Fill);
+
+        let drive_input = text_input(
+            "Enter drive name (e.g., External HDD, C: Drive)",
+            &self.drive,
+        )
+        .on_input(WriteMessage::DriveChanged)
+        .padding(10)
+        .width(Length::Fill);
+
+        let directory_section = self.create_directory_section();
 
         column![
-            category_input,
-            drive_input,
-            directory_input,
-            submit_button,
-            feedback_text
+            text("File Indexing Setup").size(24).style(text::primary),
+            Rule::horizontal(1),
+            column![text("Category").size(16), category_input,].spacing(5),
+            column![text("Drive Name").size(16), drive_input,].spacing(5),
+            directory_section,
         ]
+        .spacing(15)
         .into()
     }
 
-    fn category_input(&'_ self) -> TextInput<'_, WriteMessage> {
-        text_input("Choose a category", &self.category).on_input(WriteMessage::CategoryChanged)
-    }
+    fn create_directory_section(&'_ self) -> Element<'_, WriteMessage> {
+        let directory_label = text("Directory").size(16);
 
-    fn drive_input(&'_ self) -> TextInput<'_, WriteMessage> {
-        text_input("Choose a drive", &self.drive).on_input(WriteMessage::DriveChanged)
-    }
+        let directory_display = if let Some(dir) = &self.directory {
+            text(format!("Selected: {}", dir.display())).style(text::success)
+        } else {
+            text("No directory selected").style(text::secondary)
+        };
 
-    fn directory_input() -> Column<'static, WriteMessage> {
+        let browse_button = button(text("Browse Directory"))
+            .on_press(WriteMessage::DirectoryPressed)
+            .padding(10)
+            .style(button::secondary);
+
         column![
-            text("Select a directory"),
-            button("Browse directory").on_press(WriteMessage::DirectoryPressed),
+            directory_label,
+            row![directory_display, browse_button]
+                .spacing(10)
+                .align_y(Alignment::Center),
         ]
+        .spacing(5)
+        .into()
     }
 
-    fn submit_button(&'_ self) -> Button<'_, WriteMessage> {
-        button("Submit").on_press_maybe(
-            if !self.category.is_empty() && !self.drive.is_empty() && self.directory.is_some() {
+    fn create_action_section(&'_ self) -> Element<'_, WriteMessage> {
+        let can_submit = !self.category.is_empty()
+            && !self.drive.is_empty()
+            && self.directory.is_some()
+            && !self.is_walking_directory
+            && !self.is_inserting_in_database;
+
+        let submit_button = button(text("Start Indexing"))
+            .on_press_maybe(if can_submit {
                 Some(WriteMessage::WriteSubmit)
             } else {
                 None
-            },
-        )
+            })
+            .padding(15)
+            .width(Length::Fill)
+            .style(if can_submit {
+                button::primary
+            } else {
+                button::text
+            });
+
+        let requirements_text =
+            if !can_submit && !self.is_walking_directory && !self.is_inserting_in_database {
+                text("Please fill in all fields to start indexing")
+                    .style(text::secondary)
+                    .size(12)
+            } else {
+                text("")
+            };
+
+        column![Rule::horizontal(1), submit_button, requirements_text,]
+            .spacing(10)
+            .into()
     }
 
-    fn feedback_text(&'_ self) -> Element<'_, WriteMessage> {
-        let feedback = if self.is_walking_directory {
-            "Finding files to insert"
+    fn create_status_section(&'_ self) -> Element<'_, WriteMessage> {
+        if !self.is_walking_directory && !self.is_inserting_in_database && !self.is_finished {
+            return column![].into();
+        }
+
+        let status_content = if self.is_walking_directory {
+            column![
+                text("[SCAN] Scanning Directory")
+                    .size(18)
+                    .style(text::primary),
+                text("Finding files to index... This may take a while for large directories.")
+                    .style(text::secondary)
+                    .size(14),
+            ]
         } else if self.is_inserting_in_database {
-            "Inserting in database"
+            column![
+                text("[SAVE] Inserting Data").size(18).style(text::primary),
+                text("Adding files to database... Please wait.")
+                    .style(text::secondary)
+                    .size(14),
+            ]
         } else if self.is_finished {
-            "Files have been inserted in database"
+            column![
+                text("[DONE] Indexing Complete")
+                    .size(18)
+                    .style(text::success),
+                text("Files have been successfully indexed and added to the database.")
+                    .style(text::success)
+                    .size(14),
+                button(text("Start New Indexing"))
+                    .on_press(WriteMessage::ResetForm)
+                    .padding(10)
+                    .style(button::secondary),
+            ]
         } else {
-            ""
+            column![]
         };
-        text(feedback).into()
+
+        column![Rule::horizontal(1), status_content.spacing(10),]
+            .spacing(15)
+            .into()
     }
 
     fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
         match message {
-            WriteMessage::CategoryChanged(result) => {
-                self.category = result;
-                Task::none()
-            }
-            WriteMessage::DriveChanged(result) => {
-                self.drive = result;
-                Task::none()
-            }
+            WriteMessage::CategoryChanged(result) => self.category_changed(result),
+            WriteMessage::DriveChanged(result) => self.drive_changed(result),
             WriteMessage::DirectoryPressed => Self::choose_directory(),
-            WriteMessage::DirectoryChanged(result) => {
-                self.directory = result;
-                Task::none()
-            }
+            WriteMessage::DirectoryChanged(result) => self.directory_changed(result),
             WriteMessage::WriteSubmit => self.walk_directory(),
             WriteMessage::WalkFinished(files) => self.insert_in_database(files),
-            WriteMessage::InsertFinished => {
-                self.is_inserting_in_database = false;
-                self.is_finished = true;
-                Task::none()
-            }
+            WriteMessage::InsertFinished => self.insert_finished(),
+            WriteMessage::ResetForm => self.reset_form(),
         }
+    }
+
+    fn category_changed(&mut self, result: String) -> Task<WriteMessage> {
+        self.category = result;
+        Task::none()
+    }
+
+    fn drive_changed(&mut self, result: String) -> Task<WriteMessage> {
+        self.drive = result;
+        Task::none()
+    }
+
+    fn choose_directory() -> Task<WriteMessage> {
+        Task::perform(
+            async {
+                AsyncFileDialog::new()
+                    .set_title("Select Directory to Index")
+                    .pick_folder()
+                    .await
+                    .map(|handle| handle.path().to_path_buf())
+            },
+            WriteMessage::DirectoryChanged,
+        )
+    }
+
+    fn directory_changed(&mut self, result: Option<PathBuf>) -> Task<WriteMessage> {
+        self.directory = result;
+        Task::none()
+    }
+
+    fn walk_directory(&mut self) -> Task<WriteMessage> {
+        self.is_walking_directory = true;
+        if let Some(directory) = self.directory.clone() {
+            return Task::perform(
+                async { walk_directory(directory).await },
+                WriteMessage::WalkFinished,
+            );
+        }
+        Task::none()
     }
 
     fn insert_in_database(&mut self, files: Vec<FileEntryModel>) -> Task<WriteMessage> {
@@ -563,28 +685,20 @@ impl WritePage {
         )
     }
 
-    fn walk_directory(&mut self) -> Task<WriteMessage> {
-        self.is_walking_directory = true;
-        if let Some(directory) = self.directory.clone() {
-            return Task::perform(
-                async { walk_directory(directory).await },
-                WriteMessage::WalkFinished,
-            );
-        }
+    fn insert_finished(&mut self) -> Task<WriteMessage> {
+        self.is_inserting_in_database = false;
+        self.is_finished = true;
         Task::none()
     }
 
-    fn choose_directory() -> Task<WriteMessage> {
-        Task::perform(
-            async {
-                AsyncFileDialog::new()
-                    .set_title("Select Directory")
-                    .pick_folder()
-                    .await
-                    .map(|handle| handle.path().to_path_buf())
-            },
-            WriteMessage::DirectoryChanged,
-        )
+    fn reset_form(&mut self) -> Task<WriteMessage> {
+        self.category = String::new();
+        self.drive = String::new();
+        self.directory = None;
+        self.is_walking_directory = false;
+        self.is_inserting_in_database = false;
+        self.is_finished = false;
+        Task::none()
     }
 }
 
@@ -679,24 +793,28 @@ impl ListerApp {
     fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
         match &mut self.current_page {
             Page::Read(page) => match message {
-                AppMessage::GoToWrite => {
-                    let write_page = WritePage::new(self.service.clone());
-                    self.current_page = Page::Write(write_page);
-                    Task::none()
-                }
+                AppMessage::GoToWrite => self.init_write_page(),
                 AppMessage::Read(msg) => page.update(msg).map(AppMessage::Read),
                 _ => Task::none(),
             },
             Page::Write(page) => match message {
-                AppMessage::GoToRead => {
-                    let (page, task) = ReadPage::new(self.service.clone());
-                    self.current_page = Page::Read(page);
-                    task.map(AppMessage::Read)
-                }
+                AppMessage::GoToRead => self.init_read_page(),
                 AppMessage::Write(msg) => page.update(msg).map(AppMessage::Write),
                 _ => Task::none(),
             },
         }
+    }
+
+    fn init_write_page(&mut self) -> Task<AppMessage> {
+        let write_page = WritePage::new(self.service.clone());
+        self.current_page = Page::Write(write_page);
+        Task::none()
+    }
+
+    fn init_read_page(&mut self) -> Task<AppMessage> {
+        let (page, task) = ReadPage::new(self.service.clone());
+        self.current_page = Page::Read(page);
+        task.map(AppMessage::Read)
     }
 }
 
