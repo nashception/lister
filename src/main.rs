@@ -9,6 +9,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
 use iced::widget::scrollable::RelativeOffset;
 use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
+use iced::window::{icon, Icon, Settings};
 use iced::{Alignment, Element, Length, Task};
 use rfd::AsyncFileDialog;
 use std::fs;
@@ -66,7 +67,21 @@ static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 });
 
 fn main() -> iced::Result {
-    iced::application("Lister", ListerApp::update, ListerApp::view).run_with(|| ListerApp::new())
+    iced::application("Lister", ListerApp::update, ListerApp::view)
+        .window(window())
+        .run_with(|| ListerApp::new())
+}
+
+fn window() -> Settings {
+    Settings {
+        icon: Some(lister_icon()),
+        ..Default::default()
+    }
+}
+
+fn lister_icon() -> Icon {
+    icon::from_file_data(include_bytes!("../assets/icon.png"), None)
+        .expect("Icon file should exist and be ICO format")
 }
 
 #[derive(Clone, Debug)]

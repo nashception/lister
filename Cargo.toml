@@ -8,10 +8,10 @@ publish = false
 diesel = { version = "*", features = ["r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"] }
 diesel_migrations = "*"
 humansize = "*"
-iced = { version = "*", features = ["system"]}
+iced = { version = "*", features = ["image"] }
 rfd = "*"
 thiserror = "*"
-tokio = { version = "*", features = ["rt-multi-thread"]}
+tokio = { version = "*", features = ["rt-multi-thread"] }
 walkdir = "*"
 
 # to have sqlite libraries bundled in windows binary
