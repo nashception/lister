@@ -1,6 +1,10 @@
 #![windows_subsystem = "windows"]
 extern crate libsqlite3_sys;
 
+// ============================================================================
+// IMPORTS AND DEPENDENCIES
+// ============================================================================
+
 use crate::schema::{drive_entries, file_categories, file_entries, settings};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError};
@@ -22,8 +26,11 @@ use walkdir::WalkDir;
 
 mod schema;
 
-const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
+// ============================================================================
+// CONSTANTS AND GLOBALS
+// ============================================================================
 
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 const ITEMS_PER_PAGE: usize = 100;
 const CACHED_SIZE: i64 = 10000;
 
@@ -35,67 +42,9 @@ static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .expect("failed to build Tokio runtime")
 });
 
-fn load_translations(lang: &Language) -> HashMap<String, String> {
-    let data = match lang {
-        Language::French => include_str!("../translations/fr.json"),
-        Language::English => include_str!("../translations/en.json"),
-    };
-    serde_json::from_str(data).unwrap()
-}
-
-macro_rules! tr {
-    ($translations:expr, $key:expr) => {
-        tr_impl($translations, $key, &[])
-    };
-    ($translations:expr, $key:expr, $( $k:expr => $v:expr ),* ) => {
-        tr_impl($translations, $key, &[ $( ($k, $v) ),* ])
-    };
-}
-
-fn tr_impl(translations: &HashMap<String, String>, key: &str, params: &[(&str, &str)]) -> String {
-    let mut text = translations
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| key.to_string());
-
-    for (k, v) in params {
-        text = text.replace(&format!("{{{}}}", k), v);
-    }
-
-    text
-}
-
-fn main() -> iced::Result {
-    iced::application(
-        |lister_app: &ListerApp| lister_app.title(),
-        ListerApp::update,
-        ListerApp::view,
-    )
-    .window(window())
-    .run_with(|| ListerApp::new())
-}
-
-fn window() -> Settings {
-    Settings {
-        icon: Some(lister_icon()),
-        ..Default::default()
-    }
-}
-
-fn lister_icon() -> Icon {
-    icon::from_file_data(include_bytes!("../assets/icon.png"), None)
-        .expect("Icon file should exist and be ICO format")
-}
-
-#[derive(Clone, Debug)]
-enum AppMessage {
-    ChangeLanguage(Language),
-    LanguageChanged(Language, HashMap<String, String>),
-    GoToRead,
-    GoToWrite,
-    Read(ReadMessage),
-    Write(WriteMessage),
-}
+// ============================================================================
+// CORE ENUMS AND DATA STRUCTURES
+// ============================================================================
 
 #[derive(Clone, Debug)]
 enum Language {
@@ -127,9 +76,14 @@ impl Language {
     }
 }
 
-enum Page {
-    Read(ReadPage),
-    Write(WritePage),
+#[derive(Clone, Debug)]
+enum AppMessage {
+    ChangeLanguage(Language),
+    LanguageChanged(Language, HashMap<String, String>),
+    GoToRead,
+    GoToWrite,
+    Read(ReadMessage),
+    Write(WriteMessage),
 }
 
 #[derive(Clone, Debug)]
@@ -160,11 +114,498 @@ enum WriteMessage {
     ResetForm,
 }
 
+enum Page {
+    Read(ReadPage),
+    Write(WritePage),
+}
+
+// ============================================================================
+// DATA MODELS
+// ============================================================================
+
 #[derive(Clone, Debug)]
 struct PaginatedFiles {
     files: Vec<FileWithInfoModel>,
     total_count: i64,
 }
+
+#[derive(Clone, Debug)]
+struct FileEntryModel {
+    path: String,
+    weight: i64,
+}
+
+#[derive(Clone, Debug)]
+struct FileWithInfoModel {
+    category_name: String,
+    drive_name: String,
+    path: String,
+    weight: i64,
+}
+
+impl FileEntryModel {
+    fn into_new_file_entry(self, drive_id: i32) -> NewFileEntry {
+        NewFileEntry {
+            drive_id,
+            path: self.path,
+            weight: self.weight,
+        }
+    }
+}
+
+impl FileWithInfoModel {
+    fn parent_dir(&self) -> String {
+        Path::new(&self.path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "".to_string())
+    }
+
+    fn file_name(&self) -> String {
+        Path::new(&self.path)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "".to_string())
+    }
+}
+
+// ============================================================================
+// DATABASE ENTITIES
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Queryable, Identifiable)]
+#[diesel(table_name = file_categories)]
+struct FileCategoryEntity {
+    id: i32,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Queryable, Identifiable)]
+#[diesel(belongs_to(FileCategoryEntity, foreign_key = category_id))]
+#[diesel(table_name = drive_entries)]
+struct DriveEntryEntity {
+    id: i32,
+    category_id: i32,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Queryable, Identifiable, Associations)]
+#[diesel(belongs_to(DriveEntryEntity, foreign_key = drive_id))]
+#[diesel(table_name = file_entries)]
+struct FileEntryEntity {
+    id: i32,
+    drive_id: i32,
+    path: String,
+    weight: i64,
+}
+
+#[derive(Queryable)]
+struct FileWithInfo {
+    category_name: String,
+    drive_name: String,
+    path: String,
+    weight: i64,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = file_categories)]
+struct NewFileCategory {
+    name: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = drive_entries)]
+struct NewDriveEntry {
+    category_id: i32,
+    name: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = file_entries)]
+struct NewFileEntry {
+    drive_id: i32,
+    path: String,
+    weight: i64,
+}
+
+impl From<FileWithInfo> for FileWithInfoModel {
+    fn from(value: FileWithInfo) -> Self {
+        Self {
+            category_name: value.category_name,
+            drive_name: value.drive_name,
+            path: value.path,
+            weight: value.weight,
+        }
+    }
+}
+
+// ============================================================================
+// ERROR HANDLING
+// ============================================================================
+
+#[derive(Debug, thiserror::Error)]
+enum RepositoryError {
+    #[error("DB error: {0}")]
+    Diesel(#[from] DieselError),
+
+    #[error("Pool error: {0}")]
+    Pool(#[from] PoolError),
+}
+
+type RepositoryResult<T> = Result<T, RepositoryError>;
+
+#[derive(Debug, thiserror::Error)]
+enum ServiceError {
+    #[error("Repository error: {0}")]
+    Repo(#[from] RepositoryError),
+}
+
+type ServiceResult<T> = Result<T, ServiceError>;
+
+// ============================================================================
+// TRANSLATION SYSTEM
+// ============================================================================
+
+fn load_translations(lang: &Language) -> HashMap<String, String> {
+    let data = match lang {
+        Language::French => include_str!("../translations/fr.json"),
+        Language::English => include_str!("../translations/en.json"),
+    };
+    serde_json::from_str(data).unwrap()
+}
+
+macro_rules! tr {
+    ($translations:expr, $key:expr) => {
+        tr_impl($translations, $key, &[])
+    };
+    ($translations:expr, $key:expr, $( $k:expr => $v:expr ),* ) => {
+        tr_impl($translations, $key, &[ $( ($k, $v) ),* ])
+    };
+}
+
+fn tr_impl(translations: &HashMap<String, String>, key: &str, params: &[(&str, &str)]) -> String {
+    let mut text = translations
+        .get(key)
+        .cloned()
+        .unwrap_or_else(|| key.to_string());
+
+    for (k, v) in params {
+        text = text.replace(&format!("{{{}}}", k), v);
+    }
+
+    text
+}
+
+// ============================================================================
+// FILE SYSTEM UTILITIES
+// ============================================================================
+
+async fn walk_directory(path: PathBuf) -> Vec<FileEntryModel> {
+    TOKIO_RUNTIME
+        .handle()
+        .spawn_blocking(move || {
+            WalkDir::new(&path)
+                .sort_by_file_name()
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .map(|e| file_info(&path, e.path()))
+                .collect()
+        })
+        .await
+        .unwrap()
+}
+
+fn file_info(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> FileEntryModel {
+    FileEntryModel {
+        path: file_path(chosen_directory_path, absolute_file_path),
+        weight: weight(absolute_file_path),
+    }
+}
+
+fn file_path(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> String {
+    absolute_file_path
+        .strip_prefix(chosen_directory_path)
+        .expect("File not under chosen directory")
+        .to_path_buf()
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn weight(path: &Path) -> i64 {
+    fs::metadata(path)
+        .expect("Cannot access file metadata")
+        .len() as i64
+}
+
+// ============================================================================
+// DATABASE LAYER
+// ============================================================================
+
+fn get_connection_pool(database_url: &str) -> DieselPool {
+    let pool = create_pool(database_url);
+    enable_foreign_keys_constraints(&pool);
+    run_migrations(&pool);
+    pool
+}
+
+fn create_pool(database_url: &str) -> Pool<ConnectionManager<SqliteConnection>> {
+    let manager = ConnectionManager::<SqliteConnection>::new(database_url);
+    let pool = Pool::builder()
+        .build(manager)
+        .expect("Failed to create SQLite pool");
+    pool
+}
+
+fn enable_foreign_keys_constraints(pool: &Pool<ConnectionManager<SqliteConnection>>) {
+    let conn = &mut pool.get().expect("Failed to get connection from pool");
+    diesel::sql_query("PRAGMA foreign_keys = ON")
+        .execute(conn)
+        .expect("Failed to enable foreign keys");
+}
+
+fn run_migrations(pool: &DieselPool) {
+    let mut conn = pool.get().expect("Failed to get connection from pool");
+    conn.run_pending_migrations(MIGRATIONS)
+        .expect("Migration failed");
+}
+
+// ============================================================================
+// REPOSITORY LAYER
+// ============================================================================
+
+#[derive(Clone)]
+struct ListerRepository {
+    pool: DieselPool,
+}
+
+impl ListerRepository {
+    fn new(pool: DieselPool) -> Self {
+        ListerRepository { pool }
+    }
+
+    fn add_category(&self, category: NewFileCategory) -> RepositoryResult<i32> {
+        let mut conn = self.pool.get()?;
+        let id = diesel::insert_into(file_categories::table)
+            .values(category)
+            .returning(file_categories::id)
+            .get_result(&mut conn)?;
+        Ok(id)
+    }
+
+    fn add_drive(&self, drive: NewDriveEntry) -> RepositoryResult<i32> {
+        let mut conn = self.pool.get()?;
+        let id = diesel::insert_into(drive_entries::table)
+            .values(drive)
+            .returning(drive_entries::id)
+            .get_result(&mut conn)?;
+        Ok(id)
+    }
+
+    fn add_files(&self, files: Vec<NewFileEntry>) -> RepositoryResult<()> {
+        let mut conn = self.pool.get()?;
+        conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
+            diesel::insert_into(file_entries::table)
+                .values(&files)
+                .execute(conn)?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    fn find_files_paginated(&self, offset: i64, limit: i64) -> RepositoryResult<PaginatedFiles> {
+        let mut conn = self.pool.get()?;
+
+        let total_count: i64 = file_entries::table.count().get_result(&mut conn)?;
+
+        let entities = file_entries::table
+            .inner_join(drive_entries::table.inner_join(file_categories::table))
+            .select((
+                file_categories::name,
+                drive_entries::name,
+                file_entries::path,
+                file_entries::weight,
+            ))
+            .limit(limit)
+            .offset(offset)
+            .load::<FileWithInfo>(&mut conn)?;
+
+        let files = entities.into_iter().map(|e| e.into()).collect();
+
+        Ok(PaginatedFiles { files, total_count })
+    }
+
+    fn search_files_paginated(
+        &self,
+        search_query: &str,
+        offset: i64,
+        limit: i64,
+    ) -> RepositoryResult<PaginatedFiles> {
+        let mut conn = self.pool.get()?;
+        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
+
+        let total_count: i64 = file_entries::table
+            .filter(file_entries::path.like(&search_pattern))
+            .count()
+            .get_result(&mut conn)?;
+
+        let entities = file_entries::table
+            .inner_join(drive_entries::table.inner_join(file_categories::table))
+            .select((
+                file_categories::name,
+                drive_entries::name,
+                file_entries::path,
+                file_entries::weight,
+            ))
+            .filter(file_entries::path.like(&search_pattern))
+            .limit(limit)
+            .offset(offset)
+            .load::<FileWithInfo>(&mut conn)?;
+
+        let files = entities.into_iter().map(|e| e.into()).collect();
+        Ok(PaginatedFiles { files, total_count })
+    }
+
+    fn get_search_count(&self, search_query: &str) -> RepositoryResult<i64> {
+        let mut conn = self.pool.get()?;
+        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
+        let count = file_entries::table
+            .filter(file_entries::path.like(&search_pattern))
+            .count()
+            .get_result(&mut conn)?;
+        Ok(count)
+    }
+
+    fn get_language(&self) -> RepositoryResult<Language> {
+        let mut conn = self.pool.get()?;
+        let lang: Option<String> = settings::table
+            .filter(settings::key.eq("language"))
+            .select(settings::value)
+            .first(&mut conn)
+            .optional()?;
+
+        let lang = lang.map(|l| Language::from_string(&l));
+
+        Ok(lang.unwrap_or_else(|| Language::English))
+    }
+
+    fn set_language(&self, lang: &Language) -> RepositoryResult<()> {
+        let mut conn = self.pool.get()?;
+        diesel::replace_into(settings::table)
+            .values((
+                settings::key.eq("language"),
+                settings::value.eq(lang.to_string()),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+}
+
+// ============================================================================
+// SERVICE LAYER
+// ============================================================================
+
+struct ListerService {
+    repo: ListerRepository,
+}
+
+impl ListerService {
+    fn new(repo: ListerRepository) -> Self {
+        ListerService { repo }
+    }
+
+    async fn add_category(&self, category_name: NewFileCategory) -> ServiceResult<i32> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.add_category(category_name))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    async fn add_drive(&self, drive: NewDriveEntry) -> ServiceResult<i32> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.add_drive(drive))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    async fn add_files(&self, drive_id: i32, files: Vec<FileEntryModel>) -> ServiceResult<()> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                repo.add_files(
+                    files
+                        .into_iter()
+                        .map(|f| f.into_new_file_entry(drive_id))
+                        .collect(),
+                )
+            })
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    async fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {
+        let repo = self.repo.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.find_files_paginated(offset, limit))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    async fn search_files_paginated(
+        &self,
+        search_query: &str,
+        offset: i64,
+        limit: i64,
+    ) -> ServiceResult<PaginatedFiles> {
+        let repo = self.repo.clone();
+        let query = search_query.to_string();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.search_files_paginated(&query, offset, limit))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    async fn get_search_count(&self, search_query: &str) -> ServiceResult<i64> {
+        let repo = self.repo.clone();
+        let query = search_query.to_string();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || repo.get_search_count(&query))
+            .await
+            .unwrap()
+            .map_err(ServiceError::Repo)
+    }
+
+    fn get_language(&self) -> ServiceResult<Language> {
+        let repo = self.repo.clone();
+        repo.get_language().map_err(ServiceError::Repo)
+    }
+
+    fn load_translations(&self) -> ServiceResult<HashMap<String, String>> {
+        self.get_language().map(|l| load_translations(&l))
+    }
+
+    fn set_language(&self, lang: Language) -> ServiceResult<()> {
+        let repo = self.repo.clone();
+        repo.set_language(&lang).map_err(ServiceError::Repo)
+    }
+}
+
+// ============================================================================
+// READ PAGE IMPLEMENTATION
+// ============================================================================
 
 struct ReadPage {
     service: Arc<ListerService>,
@@ -179,20 +620,6 @@ struct ReadPage {
     active_task_id: u64,
     search_input_id: text_input::Id,
     scroll_bar_id: scrollable::Id,
-}
-
-struct WritePage {
-    service: Arc<ListerService>,
-    category: String,
-    drive: String,
-    directory: Option<PathBuf>,
-
-    is_walking_directory: bool,
-    is_inserting_in_database: bool,
-    is_finished: bool,
-    nb_files_inserted: usize,
-    category_input_id: text_input::Id,
-    drive_input_id: text_input::Id,
 }
 
 impl ReadPage {
@@ -526,6 +953,24 @@ impl ReadPage {
     }
 }
 
+// ============================================================================
+// WRITE PAGE IMPLEMENTATION
+// ============================================================================
+
+struct WritePage {
+    service: Arc<ListerService>,
+    category: String,
+    drive: String,
+    directory: Option<PathBuf>,
+
+    is_walking_directory: bool,
+    is_inserting_in_database: bool,
+    is_finished: bool,
+    nb_files_inserted: usize,
+    category_input_id: text_input::Id,
+    drive_input_id: text_input::Id,
+}
+
 impl WritePage {
     fn new(service: Arc<ListerService>) -> (Self, Task<WriteMessage>) {
         let category_input_id = text_input::Id::unique();
@@ -797,7 +1242,7 @@ impl WritePage {
         )
     }
 
-    fn insert_finished(&mut self, nb_files:usize) -> Task<WriteMessage> {
+    fn insert_finished(&mut self, nb_files: usize) -> Task<WriteMessage> {
         self.is_inserting_in_database = false;
         self.is_finished = true;
         self.nb_files_inserted = nb_files;
@@ -815,43 +1260,9 @@ impl WritePage {
     }
 }
 
-async fn walk_directory(path: PathBuf) -> Vec<FileEntryModel> {
-    TOKIO_RUNTIME
-        .handle()
-        .spawn_blocking(move || {
-            WalkDir::new(&path)
-                .sort_by_file_name()
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-                .map(|e| file_info(&path, e.path()))
-                .collect()
-        })
-        .await
-        .unwrap()
-}
-
-fn file_info(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> FileEntryModel {
-    FileEntryModel {
-        path: file_path(chosen_directory_path, absolute_file_path),
-        weight: weight(absolute_file_path),
-    }
-}
-
-fn file_path(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> String {
-    absolute_file_path
-        .strip_prefix(chosen_directory_path)
-        .expect("File not under chosen directory")
-        .to_path_buf()
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn weight(path: &Path) -> i64 {
-    fs::metadata(path)
-        .expect("Cannot access file metadata")
-        .len() as i64
-}
+// ============================================================================
+// MAIN APPLICATION
+// ============================================================================
 
 struct ListerApp {
     service: Arc<ListerService>,
@@ -1016,382 +1427,28 @@ impl ListerApp {
     }
 }
 
-fn get_connection_pool(database_url: &str) -> DieselPool {
-    let pool = create_pool(database_url);
-    enable_foreign_keys_constraints(&pool);
-    run_migrations(&pool);
-    pool
-}
+// ============================================================================
+// APPLICATION SETUP AND MAIN
+// ============================================================================
 
-fn create_pool(database_url: &str) -> Pool<ConnectionManager<SqliteConnection>> {
-    let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-    let pool = Pool::builder()
-        .build(manager)
-        .expect("Failed to create SQLite pool");
-    pool
-}
-
-fn enable_foreign_keys_constraints(pool: &Pool<ConnectionManager<SqliteConnection>>) {
-    let conn = &mut pool.get().expect("Failed to get connection from pool");
-    diesel::sql_query("PRAGMA foreign_keys = ON")
-        .execute(conn)
-        .expect("Failed to enable foreign keys");
-}
-
-fn run_migrations(pool: &DieselPool) {
-    let mut conn = pool.get().expect("Failed to get connection from pool");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Migration failed");
-}
-
-#[derive(Clone)]
-struct ListerRepository {
-    pool: DieselPool,
-}
-
-impl ListerRepository {
-    fn new(pool: DieselPool) -> Self {
-        ListerRepository { pool }
+fn window() -> Settings {
+    Settings {
+        icon: Some(lister_icon()),
+        ..Default::default()
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-enum RepositoryError {
-    #[error("DB error: {0}")]
-    Diesel(#[from] DieselError),
-
-    #[error("Pool error: {0}")]
-    Pool(#[from] PoolError),
+fn lister_icon() -> Icon {
+    icon::from_file_data(include_bytes!("../assets/icon.png"), None)
+        .expect("Icon file should exist and be ICO format")
 }
 
-type RepositoryResult<T> = Result<T, RepositoryError>;
-
-impl ListerRepository {
-    fn add_category(&self, category: NewFileCategory) -> RepositoryResult<i32> {
-        let mut conn = self.pool.get()?;
-        let id = diesel::insert_into(file_categories::table)
-            .values(category)
-            .returning(file_categories::id)
-            .get_result(&mut conn)?;
-        Ok(id)
-    }
-
-    fn add_drive(&self, drive: NewDriveEntry) -> RepositoryResult<i32> {
-        let mut conn = self.pool.get()?;
-        let id = diesel::insert_into(drive_entries::table)
-            .values(drive)
-            .returning(drive_entries::id)
-            .get_result(&mut conn)?;
-        Ok(id)
-    }
-
-    fn add_files(&self, files: Vec<NewFileEntry>) -> RepositoryResult<()> {
-        let mut conn = self.pool.get()?;
-        conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
-            diesel::insert_into(file_entries::table)
-                .values(&files)
-                .execute(conn)?;
-            Ok(())
-        })?;
-        Ok(())
-    }
-
-    fn find_files_paginated(&self, offset: i64, limit: i64) -> RepositoryResult<PaginatedFiles> {
-        let mut conn = self.pool.get()?;
-
-        let total_count: i64 = file_entries::table.count().get_result(&mut conn)?;
-
-        let entities = file_entries::table
-            .inner_join(drive_entries::table.inner_join(file_categories::table))
-            .select((
-                file_categories::name,
-                drive_entries::name,
-                file_entries::path,
-                file_entries::weight,
-            ))
-            .limit(limit)
-            .offset(offset)
-            .load::<FileWithInfo>(&mut conn)?;
-
-        let files = entities.into_iter().map(|e| e.into()).collect();
-
-        Ok(PaginatedFiles { files, total_count })
-    }
-
-    fn search_files_paginated(
-        &self,
-        search_query: &str,
-        offset: i64,
-        limit: i64,
-    ) -> RepositoryResult<PaginatedFiles> {
-        let mut conn = self.pool.get()?;
-        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
-
-        let total_count: i64 = file_entries::table
-            .filter(file_entries::path.like(&search_pattern))
-            .count()
-            .get_result(&mut conn)?;
-
-        let entities = file_entries::table
-            .inner_join(drive_entries::table.inner_join(file_categories::table))
-            .select((
-                file_categories::name,
-                drive_entries::name,
-                file_entries::path,
-                file_entries::weight,
-            ))
-            .filter(file_entries::path.like(&search_pattern))
-            .limit(limit)
-            .offset(offset)
-            .load::<FileWithInfo>(&mut conn)?;
-
-        let files = entities.into_iter().map(|e| e.into()).collect();
-        Ok(PaginatedFiles { files, total_count })
-    }
-
-    fn get_search_count(&self, search_query: &str) -> RepositoryResult<i64> {
-        let mut conn = self.pool.get()?;
-        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
-        let count = file_entries::table
-            .filter(file_entries::path.like(&search_pattern))
-            .count()
-            .get_result(&mut conn)?;
-        Ok(count)
-    }
-
-    fn get_language(&self) -> RepositoryResult<Language> {
-        let mut conn = self.pool.get()?;
-        let lang: Option<String> = settings::table
-            .filter(settings::key.eq("language"))
-            .select(settings::value)
-            .first(&mut conn)
-            .optional()?;
-
-        let lang = lang.map(|l| Language::from_string(&l));
-
-        Ok(lang.unwrap_or_else(|| Language::English))
-    }
-
-    fn set_language(&self, lang: &Language) -> RepositoryResult<()> {
-        let mut conn = self.pool.get()?;
-        diesel::replace_into(settings::table)
-            .values((
-                settings::key.eq("language"),
-                settings::value.eq(lang.to_string()),
-            ))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Queryable, Identifiable)]
-#[diesel(table_name = file_categories)]
-struct FileCategoryEntity {
-    id: i32,
-    name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Queryable, Identifiable)]
-#[diesel(belongs_to(FileCategoryEntity, foreign_key = category_id))]
-#[diesel(table_name = drive_entries)]
-struct DriveEntryEntity {
-    id: i32,
-    category_id: i32,
-    name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Queryable, Identifiable, Associations)]
-#[diesel(belongs_to(DriveEntryEntity, foreign_key = drive_id))]
-#[diesel(table_name = file_entries)]
-struct FileEntryEntity {
-    id: i32,
-    drive_id: i32,
-    path: String,
-    weight: i64,
-}
-
-#[derive(Queryable)]
-struct FileWithInfo {
-    category_name: String,
-    drive_name: String,
-    path: String,
-    weight: i64,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = file_categories)]
-struct NewFileCategory {
-    name: String,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = drive_entries)]
-struct NewDriveEntry {
-    category_id: i32,
-    name: String,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = file_entries)]
-struct NewFileEntry {
-    drive_id: i32,
-    path: String,
-    weight: i64,
-}
-
-#[derive(Clone, Debug)]
-struct FileEntryModel {
-    path: String,
-    weight: i64,
-}
-
-#[derive(Clone, Debug)]
-struct FileWithInfoModel {
-    category_name: String,
-    drive_name: String,
-    path: String,
-    weight: i64,
-}
-
-impl FileEntryModel {
-    fn into_new_file_entry(self, drive_id: i32) -> NewFileEntry {
-        NewFileEntry {
-            drive_id,
-            path: self.path,
-            weight: self.weight,
-        }
-    }
-}
-
-impl FileWithInfoModel {
-    fn parent_dir(&self) -> String {
-        Path::new(&self.path)
-            .parent()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "".to_string())
-    }
-
-    fn file_name(&self) -> String {
-        Path::new(&self.path)
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "".to_string())
-    }
-}
-
-impl From<FileWithInfo> for FileWithInfoModel {
-    fn from(value: FileWithInfo) -> Self {
-        Self {
-            category_name: value.category_name,
-            drive_name: value.drive_name,
-            path: value.path,
-            weight: value.weight,
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-enum ServiceError {
-    #[error("Repository error: {0}")]
-    Repo(#[from] RepositoryError),
-}
-
-type ServiceResult<T> = Result<T, ServiceError>;
-
-struct ListerService {
-    repo: ListerRepository,
-}
-
-impl ListerService {
-    fn new(repo: ListerRepository) -> Self {
-        ListerService { repo }
-    }
-
-    async fn add_category(&self, category_name: NewFileCategory) -> ServiceResult<i32> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.add_category(category_name))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn add_drive(&self, drive: NewDriveEntry) -> ServiceResult<i32> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.add_drive(drive))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn add_files(&self, drive_id: i32, files: Vec<FileEntryModel>) -> ServiceResult<()> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                repo.add_files(
-                    files
-                        .into_iter()
-                        .map(|f| f.into_new_file_entry(drive_id))
-                        .collect(),
-                )
-            })
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.find_files_paginated(offset, limit))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn search_files_paginated(
-        &self,
-        search_query: &str,
-        offset: i64,
-        limit: i64,
-    ) -> ServiceResult<PaginatedFiles> {
-        let repo = self.repo.clone();
-        let query = search_query.to_string();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.search_files_paginated(&query, offset, limit))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn get_search_count(&self, search_query: &str) -> ServiceResult<i64> {
-        let repo = self.repo.clone();
-        let query = search_query.to_string();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.get_search_count(&query))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    fn get_language(&self) -> ServiceResult<Language> {
-        let repo = self.repo.clone();
-        repo.get_language().map_err(ServiceError::Repo)
-    }
-
-    fn load_translations(&self) -> ServiceResult<HashMap<String, String>> {
-        self.get_language().map(|l| load_translations(&l))
-    }
-
-    fn set_language(&self, lang: Language) -> ServiceResult<()> {
-        let repo = self.repo.clone();
-        repo.set_language(&lang).map_err(ServiceError::Repo)
-    }
+fn main() -> iced::Result {
+    iced::application(
+        |lister_app: &ListerApp| lister_app.title(),
+        ListerApp::update,
+        ListerApp::view,
+    )
+    .window(window())
+    .run_with(|| ListerApp::new())
 }
