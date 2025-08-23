@@ -28,6 +28,6 @@
   "save_status": "[SAVE] Inserting Data",
   "save_details": "Adding files to database... Please wait.",
   "done_status": "[DONE] Indexing Complete",
-  "done_details": "Files have been successfully indexed and added to the database.",
+  "done_details": "{nb_files} Files have been successfully indexed and added to the database.",
   "start_new_indexing": "Start New Indexing"
 }

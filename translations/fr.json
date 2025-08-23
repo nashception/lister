@@ -28,6 +28,6 @@
   "save_status": "[ENREG] Insertion des données",
   "save_details": "Ajout des fichiers à la base de données... Veuillez patienter.",
   "done_status": "[TERMINÉ] Indexation terminée",
-  "done_details": "Les fichiers ont été indexés et ajoutés à la base de données avec succès.",
+  "done_details": "{nb_files} fichiers ont été indexés et ajoutés à la base de données avec succès.",
   "start_new_indexing": "Commencer une nouvelle indexation"
 }

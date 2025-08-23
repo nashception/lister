@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 extern crate libsqlite3_sys;
 
-use crate::schema::{drive_entries, file_categories, file_entries};
+use crate::schema::{drive_entries, file_categories, file_entries, settings};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError};
 use diesel::result::Error as DieselError;
@@ -35,12 +35,12 @@ static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .expect("failed to build Tokio runtime")
 });
 
-fn load_translations(lang: Language) -> HashMap<String, String> {
-    let lang = lang.to_string();
-    let path = format!("translations/{}.json", lang);
-    let file = fs::read_to_string(path)
-        .unwrap_or_else(|_| panic!("Missing translation file for language: {}", lang));
-    serde_json::from_str(&file).expect("Invalid translation JSON")
+fn load_translations(lang: &Language) -> HashMap<String, String> {
+    let data = match lang {
+        Language::French => include_str!("../translations/fr.json"),
+        Language::English => include_str!("../translations/en.json"),
+    };
+    serde_json::from_str(data).unwrap()
 }
 
 macro_rules! tr {
@@ -89,13 +89,15 @@ fn lister_icon() -> Icon {
 
 #[derive(Clone, Debug)]
 enum AppMessage {
+    ChangeLanguage(Language),
+    LanguageChanged(Language, HashMap<String, String>),
     GoToRead,
     GoToWrite,
     Read(ReadMessage),
     Write(WriteMessage),
-    ChangeLanguage,
 }
 
+#[derive(Clone, Debug)]
 enum Language {
     English,
     French,
@@ -106,6 +108,21 @@ impl Language {
         match self {
             Language::English => "en",
             Language::French => "fr",
+        }
+    }
+
+    fn from_string(language: &str) -> Language {
+        match language.to_lowercase().as_str() {
+            "en" => Language::English,
+            "fr" => Language::French,
+            _ => Language::English,
+        }
+    }
+
+    fn change_language(&self) -> Language {
+        match self {
+            Language::English => Language::French,
+            Language::French => Language::English,
         }
     }
 }
@@ -139,7 +156,7 @@ enum WriteMessage {
     DirectoryChanged(Option<PathBuf>),
     WriteSubmit,
     WalkFinished(Vec<FileEntryModel>),
-    InsertFinished,
+    InsertFinished(usize),
     ResetForm,
 }
 
@@ -173,6 +190,7 @@ struct WritePage {
     is_walking_directory: bool,
     is_inserting_in_database: bool,
     is_finished: bool,
+    nb_files_inserted: usize,
     category_input_id: text_input::Id,
     drive_input_id: text_input::Id,
 }
@@ -519,6 +537,7 @@ impl WritePage {
             is_walking_directory: false,
             is_inserting_in_database: false,
             is_finished: false,
+            nb_files_inserted: 0,
             category_input_id: category_input_id.clone(),
             drive_input_id: text_input::Id::unique(),
         };
@@ -674,7 +693,7 @@ impl WritePage {
                 text(tr!(translations, "done_status"))
                     .size(18)
                     .style(text::success),
-                text(tr!(translations, "done_details"))
+                text(tr!(translations, "done_details", "nb_files" => &self.nb_files_inserted.to_string()))
                     .style(text::success)
                     .size(14),
                 button(text(tr!(translations, "start_new_indexing")))
@@ -701,7 +720,7 @@ impl WritePage {
             WriteMessage::DirectoryChanged(result) => self.directory_changed(result),
             WriteMessage::WriteSubmit => self.walk_directory(),
             WriteMessage::WalkFinished(files) => self.insert_in_database(files),
-            WriteMessage::InsertFinished => self.insert_finished(),
+            WriteMessage::InsertFinished(nb_files) => self.insert_finished(nb_files),
             WriteMessage::ResetForm => self.reset_form(),
         }
     }
@@ -770,16 +789,18 @@ impl WritePage {
                         name: drive,
                     })
                     .await?;
+                let nb_files = files.len();
                 service.add_files(drive_id, files).await?;
-                Ok::<(), ServiceError>(())
+                Ok::<usize, ServiceError>(nb_files)
             },
-            |_| WriteMessage::InsertFinished,
+            |result| WriteMessage::InsertFinished(result.unwrap()),
         )
     }
 
-    fn insert_finished(&mut self) -> Task<WriteMessage> {
+    fn insert_finished(&mut self, nb_files:usize) -> Task<WriteMessage> {
         self.is_inserting_in_database = false;
         self.is_finished = true;
+        self.nb_files_inserted = nb_files;
         Task::none()
     }
 
@@ -834,7 +855,7 @@ fn weight(path: &Path) -> i64 {
 
 struct ListerApp {
     service: Arc<ListerService>,
-    french_enabled: bool,
+    current_language: Language,
     translations: HashMap<String, String>,
     current_page: Page,
 }
@@ -848,11 +869,13 @@ impl ListerApp {
     fn new() -> (Self, Task<AppMessage>) {
         let service = init_back_end();
         let (page, task) = ReadPage::new(service.clone());
+
+        let language = service.get_language().unwrap();
         (
             Self {
                 service,
-                french_enabled: true,
-                translations: load_translations(Language::French),
+                current_language: language.clone(),
+                translations: load_translations(&language),
                 current_page: Page::Read(page),
             },
             task.map(AppMessage::Read),
@@ -902,36 +925,81 @@ impl ListerApp {
     }
 
     fn language_toggle(&'_ self) -> Row<'_, AppMessage> {
-        let label = if self.french_enabled { "FR" } else { "EN" };
+        let label = match self.current_language {
+            Language::French => "FR",
+            Language::English => "EN",
+        };
 
-        let button = button(text(label)).on_press(AppMessage::ChangeLanguage);
+        let button = button(text(label)).on_press(AppMessage::ChangeLanguage(
+            Language::from_string(label).change_language(),
+        ));
         row![Space::with_width(Length::Fill), button].width(Length::Fill)
     }
 
     fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
         match message {
-            AppMessage::ChangeLanguage => {
-                self.french_enabled = !self.french_enabled;
-                let lang = if self.french_enabled {
-                    Language::French
-                } else {
-                    Language::English
-                };
-                self.set_language(lang);
+            AppMessage::ChangeLanguage(language) => self.change_language(language),
+            AppMessage::LanguageChanged(language, translations) => {
+                self.language_changed(language, translations)
             }
-            _ => (),
+            AppMessage::GoToWrite => self.go_to_write(),
+            AppMessage::Read(msg) => self.read(msg),
+            AppMessage::GoToRead => self.go_to_read(),
+            AppMessage::Write(msg) => self.write(msg),
         }
-        match &mut self.current_page {
-            Page::Read(page) => match message {
-                AppMessage::GoToWrite => self.init_write_page(),
-                AppMessage::Read(msg) => page.update(msg).map(AppMessage::Read),
-                _ => Task::none(),
+    }
+
+    fn change_language(&mut self, language: Language) -> Task<AppMessage> {
+        let service = self.service.clone();
+        Task::perform(
+            async move {
+                service.set_language(language.clone()).unwrap();
+                let translations = service.load_translations().unwrap();
+                (language, translations)
             },
-            Page::Write(page) => match message {
-                AppMessage::GoToRead => self.init_read_page(),
-                AppMessage::Write(msg) => page.update(msg).map(AppMessage::Write),
-                _ => Task::none(),
-            },
+            |(language, translations)| AppMessage::LanguageChanged(language, translations),
+        )
+    }
+
+    fn language_changed(
+        &mut self,
+        language: Language,
+        translations: HashMap<String, String>,
+    ) -> Task<AppMessage> {
+        self.translations = translations;
+        self.current_language = language;
+        Task::none()
+    }
+
+    fn go_to_write(&mut self) -> Task<AppMessage> {
+        if let Page::Read(_) = &mut self.current_page {
+            self.init_write_page()
+        } else {
+            Task::none()
+        }
+    }
+
+    fn read(&mut self, msg: ReadMessage) -> Task<AppMessage> {
+        if let Page::Read(page) = &mut self.current_page {
+            page.update(msg).map(AppMessage::Read)
+        } else {
+            Task::none()
+        }
+    }
+
+    fn go_to_read(&mut self) -> Task<AppMessage> {
+        if let Page::Write(_) = &mut self.current_page {
+            self.init_read_page()
+        } else {
+            Task::none()
+        }
+    }
+
+    fn write(&mut self, msg: WriteMessage) -> Task<AppMessage> {
+        if let Page::Write(page) = &mut self.current_page {
+            page.update(msg).map(AppMessage::Write)
+        } else {
+            Task::none()
         }
     }
 
@@ -945,10 +1013,6 @@ impl ListerApp {
         let (page, task) = ReadPage::new(self.service.clone());
         self.current_page = Page::Read(page);
         task.map(AppMessage::Read)
-    }
-
-    fn set_language(&mut self, language: Language) {
-        self.translations = load_translations(language);
     }
 }
 
@@ -1093,6 +1157,30 @@ impl ListerRepository {
             .count()
             .get_result(&mut conn)?;
         Ok(count)
+    }
+
+    fn get_language(&self) -> RepositoryResult<Language> {
+        let mut conn = self.pool.get()?;
+        let lang: Option<String> = settings::table
+            .filter(settings::key.eq("language"))
+            .select(settings::value)
+            .first(&mut conn)
+            .optional()?;
+
+        let lang = lang.map(|l| Language::from_string(&l));
+
+        Ok(lang.unwrap_or_else(|| Language::English))
+    }
+
+    fn set_language(&self, lang: &Language) -> RepositoryResult<()> {
+        let mut conn = self.pool.get()?;
+        diesel::replace_into(settings::table)
+            .values((
+                settings::key.eq("language"),
+                settings::value.eq(lang.to_string()),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
     }
 }
 
@@ -1291,5 +1379,19 @@ impl ListerService {
             .await
             .unwrap()
             .map_err(ServiceError::Repo)
+    }
+
+    fn get_language(&self) -> ServiceResult<Language> {
+        let repo = self.repo.clone();
+        repo.get_language().map_err(ServiceError::Repo)
+    }
+
+    fn load_translations(&self) -> ServiceResult<HashMap<String, String>> {
+        self.get_language().map(|l| load_translations(&l))
+    }
+
+    fn set_language(&self, lang: Language) -> ServiceResult<()> {
+        let repo = self.repo.clone();
+        repo.set_language(&lang).map_err(ServiceError::Repo)
     }
 }

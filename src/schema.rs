@@ -24,6 +24,13 @@ table! {
     }
 }
 
+table! {
+    settings (key) {
+        key -> Text,
+        value -> Text,
+    }
+}
+
 joinable!(drive_entries -> file_categories (category_id));
 joinable!(file_entries -> drive_entries (drive_id));
 
