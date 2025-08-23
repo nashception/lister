@@ -5,6 +5,10 @@ edition = "2024"
 publish = false
 
 [dependencies]
+# to have sqlite libraries bundled in windows binary
+libsqlite3-sys = { version = "*", features = ["bundled-windows"] }
+
+async-trait = "*"
 diesel = { version = "*", features = ["r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"] }
 diesel_migrations = "*"
 humansize = "*"
@@ -14,6 +18,3 @@ serde_json = "*"
 thiserror = "*"
 tokio = { version = "*", features = ["rt-multi-thread"] }
 walkdir = "*"
-
-# to have sqlite libraries bundled in windows binary
-libsqlite3-sys = { version = "*", features = ["bundled-windows"] }

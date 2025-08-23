@@ -43,136 +43,413 @@ static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 });
 
 // ============================================================================
-// CORE ENUMS AND DATA STRUCTURES
+// DOMAIN - CORE BUSINESS LOGIC (HEXAGON CENTER)
 // ============================================================================
 
-#[derive(Clone, Debug)]
-enum Language {
-    English,
-    French,
+// Domain Value Objects
+#[derive(Clone, Debug, PartialEq)]
+pub struct Language {
+    code: String,
 }
 
 impl Language {
-    fn to_string(&self) -> &str {
-        match self {
-            Language::English => "en",
-            Language::French => "fr",
+    pub fn new(code: &str) -> Self {
+        let normalized_code = match code.to_lowercase().as_str() {
+            "en" | "english" => "en",
+            "fr" | "french" => "fr",
+            _ => "en",
+        };
+        Self {
+            code: normalized_code.to_string(),
         }
     }
 
-    fn from_string(language: &str) -> Language {
-        match language.to_lowercase().as_str() {
-            "en" => Language::English,
-            "fr" => Language::French,
-            _ => Language::English,
-        }
+    pub fn english() -> Self {
+        Self::new("en")
     }
 
-    fn change_language(&self) -> Language {
-        match self {
-            Language::English => Language::French,
-            Language::French => Language::English,
-        }
+    pub fn french() -> Self {
+        Self::new("fr")
     }
-}
 
-#[derive(Clone, Debug)]
-enum AppMessage {
-    ChangeLanguage(Language),
-    LanguageChanged(Language, HashMap<String, String>),
-    GoToRead,
-    GoToWrite,
-    Read(ReadMessage),
-    Write(WriteMessage),
-}
+    pub fn code(&self) -> &str {
+        &self.code
+    }
 
-#[derive(Clone, Debug)]
-enum ReadMessage {
-    FirstPage,
-    PrevPage,
-    PageInputChanged(String),
-    PageInputSubmit,
-    NextPage,
-    LastPage,
-    SearchSubmit,
-    ContentChanged(String),
-    SearchClear,
-    FilesLoaded((u64, PaginatedFiles)),
-}
-
-#[derive(Clone, Debug)]
-enum WriteMessage {
-    CategoryChanged(String),
-    CategorySubmit,
-    DriveChanged(String),
-    DriveSubmit,
-    DirectoryPressed,
-    DirectoryChanged(Option<PathBuf>),
-    WriteSubmit,
-    WalkFinished(Vec<FileEntryModel>),
-    InsertFinished(usize),
-    ResetForm,
-}
-
-enum Page {
-    Read(ReadPage),
-    Write(WritePage),
-}
-
-// ============================================================================
-// DATA MODELS
-// ============================================================================
-
-#[derive(Clone, Debug)]
-struct PaginatedFiles {
-    files: Vec<FileWithInfoModel>,
-    total_count: i64,
-}
-
-#[derive(Clone, Debug)]
-struct FileEntryModel {
-    path: String,
-    weight: i64,
-}
-
-#[derive(Clone, Debug)]
-struct FileWithInfoModel {
-    category_name: String,
-    drive_name: String,
-    path: String,
-    weight: i64,
-}
-
-impl FileEntryModel {
-    fn into_new_file_entry(self, drive_id: i32) -> NewFileEntry {
-        NewFileEntry {
-            drive_id,
-            path: self.path,
-            weight: self.weight,
+    pub fn toggle(&self) -> Self {
+        match self.code.as_str() {
+            "en" => Self::french(),
+            "fr" => Self::english(),
+            _ => Self::english(),
         }
     }
 }
 
-impl FileWithInfoModel {
-    fn parent_dir(&self) -> String {
+// Domain Entities
+#[derive(Clone, Debug)]
+pub struct FileEntry {
+    pub path: String,
+    pub size_bytes: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct FileWithMetadata {
+    pub category_name: String,
+    pub drive_name: String,
+    pub path: String,
+    pub size_bytes: i64,
+}
+
+impl FileWithMetadata {
+    pub fn parent_directory(&self) -> String {
         Path::new(&self.path)
             .parent()
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "".to_string())
+            .unwrap_or_default()
     }
 
-    fn file_name(&self) -> String {
+    pub fn filename(&self) -> String {
         Path::new(&self.path)
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "".to_string())
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Category {
+    pub name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Drive {
+    pub name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct PaginatedResult<T> {
+    pub items: Vec<T>,
+    pub total_count: i64,
+}
+
+// Domain Services
+pub struct DirectoryScanner {
+    pub category: String,
+    pub drive: String,
+    pub directory: PathBuf,
+}
+
+impl DirectoryScanner {
+    pub fn new(category: String, drive: String, directory: PathBuf) -> Self {
+        Self {
+            category,
+            drive,
+            directory,
+        }
+    }
+
+    pub async fn scan_directory(&self) -> Vec<FileEntry> {
+        let directory = self.directory.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                WalkDir::new(&directory)
+                    .sort_by_file_name()
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                    .map(|e| Self::extract_file_info(&directory, e.path()))
+                    .collect()
+            })
+            .await
+            .unwrap()
+    }
+
+    fn extract_file_info(base_directory: &PathBuf, file_path: &Path) -> FileEntry {
+        FileEntry {
+            path: Self::relative_path(base_directory, file_path),
+            size_bytes: Self::file_size(file_path),
+        }
+    }
+
+    fn relative_path(base_directory: &PathBuf, file_path: &Path) -> String {
+        file_path
+            .strip_prefix(base_directory)
+            .expect("File not under chosen directory")
+            .to_path_buf()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn file_size(path: &Path) -> i64 {
+        fs::metadata(path)
+            .expect("Cannot access file metadata")
+            .len() as i64
     }
 }
 
 // ============================================================================
-// DATABASE ENTITIES
+// PORTS - INTERFACES (HEXAGON BOUNDARIES)
 // ============================================================================
 
+// Primary Ports (Driving Side - Used by external actors)
+
+#[async_trait::async_trait]
+pub trait FileQueryUseCase: Send + Sync {
+    async fn search_files(
+        &self,
+        query: &str,
+        page: usize,
+        page_size: usize,
+    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError>;
+
+    async fn list_files(
+        &self,
+        page: usize,
+        page_size: usize,
+    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError>;
+
+    async fn count_search_results(&self, query: &str) -> Result<i64, DomainError>;
+}
+
+#[async_trait::async_trait]
+pub trait FileIndexingUseCase: Send + Sync {
+    async fn index_directory(
+        &self,
+        category: String,
+        drive: String,
+        directory: PathBuf,
+    ) -> Result<usize, DomainError>;
+}
+
+#[async_trait::async_trait]
+pub trait LanguageManagementUseCase: Send + Sync {
+    fn get_current_language(&self) -> Result<Language, DomainError>;
+    fn set_language(&self, language: Language) -> Result<(), DomainError>;
+    fn load_translations(
+        &self,
+        language: &Language,
+    ) -> Result<HashMap<String, String>, DomainError>;
+}
+
+// Secondary Ports (Driven Side - Implemented by external adapters)
+
+#[async_trait::async_trait]
+pub trait FileQueryRepository: Send + Sync {
+    async fn find_files_paginated(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError>;
+
+    async fn search_files_paginated(
+        &self,
+        query: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError>;
+
+    async fn count_search_results(&self, query: &str) -> Result<i64, RepositoryError>;
+}
+
+#[async_trait::async_trait]
+pub trait FileCommandRepository: Send + Sync {
+    async fn save_category(&self, category: Category) -> Result<i32, RepositoryError>;
+    async fn save_drive(&self, drive: Drive, category_id: i32) -> Result<i32, RepositoryError>;
+    async fn save_files(&self, drive_id: i32, files: Vec<FileEntry>)
+    -> Result<(), RepositoryError>;
+}
+
+pub trait LanguageRepository: Send + Sync {
+    fn get_language(&self) -> Result<Language, RepositoryError>;
+    fn set_language(&self, language: &Language) -> Result<(), RepositoryError>;
+}
+
+#[async_trait::async_trait]
+pub trait DirectoryPicker: Send + Sync {
+    async fn pick_directory(&self) -> Option<PathBuf>;
+}
+
+pub trait TranslationLoader: Send + Sync {
+    fn load_translations(&self, language: &Language) -> HashMap<String, String>;
+}
+
+// ============================================================================
+// DOMAIN SERVICES (HEXAGON CORE)
+// ============================================================================
+
+pub struct FileQueryService {
+    query_repo: Arc<dyn FileQueryRepository>,
+}
+
+impl FileQueryService {
+    pub fn new(query_repo: Arc<dyn FileQueryRepository>) -> Self {
+        Self { query_repo }
+    }
+}
+
+#[async_trait::async_trait]
+impl FileQueryUseCase for FileQueryService {
+    async fn search_files(
+        &self,
+        query: &str,
+        page: usize,
+        page_size: usize,
+    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError> {
+        let offset = (page * page_size) as i64;
+        let limit = page_size as i64;
+
+        // Optimize small result sets by caching
+        let count = self.query_repo.count_search_results(query).await?;
+        if count <= CACHED_SIZE {
+            self.query_repo
+                .search_files_paginated(query, 0, count)
+                .await
+                .map(|mut result| {
+                    let start = offset as usize;
+                    let end = (start + page_size).min(result.items.len());
+                    result.items = if start < result.items.len() {
+                        result.items[start..end].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+                    result
+                })
+                .map_err(DomainError::Repository)
+        } else {
+            self.query_repo
+                .search_files_paginated(query, offset, limit)
+                .await
+                .map_err(DomainError::Repository)
+        }
+    }
+
+    async fn list_files(
+        &self,
+        page: usize,
+        page_size: usize,
+    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError> {
+        let offset = (page * page_size) as i64;
+        let limit = page_size as i64;
+        self.query_repo
+            .find_files_paginated(offset, limit)
+            .await
+            .map_err(DomainError::Repository)
+    }
+
+    async fn count_search_results(&self, query: &str) -> Result<i64, DomainError> {
+        self.query_repo
+            .count_search_results(query)
+            .await
+            .map_err(DomainError::Repository)
+    }
+}
+
+pub struct FileIndexingService {
+    command_repo: Arc<dyn FileCommandRepository>,
+}
+
+impl FileIndexingService {
+    pub fn new(command_repo: Arc<dyn FileCommandRepository>) -> Self {
+        Self { command_repo }
+    }
+}
+
+#[async_trait::async_trait]
+impl FileIndexingUseCase for FileIndexingService {
+    async fn index_directory(
+        &self,
+        category: String,
+        drive: String,
+        directory: PathBuf,
+    ) -> Result<usize, DomainError> {
+        // Scan directory
+        let scanner = DirectoryScanner::new(category.clone(), drive.clone(), directory);
+        let files = scanner.scan_directory().await;
+        let file_count = files.len();
+
+        // Save to repository
+        let category_id = self
+            .command_repo
+            .save_category(Category { name: category })
+            .await?;
+        let drive_id = self
+            .command_repo
+            .save_drive(Drive { name: drive }, category_id)
+            .await?;
+        self.command_repo.save_files(drive_id, files).await?;
+
+        Ok(file_count)
+    }
+}
+
+pub struct LanguageService {
+    language_repo: Arc<dyn LanguageRepository>,
+    translation_loader: Arc<dyn TranslationLoader>,
+}
+
+impl LanguageService {
+    pub fn new(
+        language_repo: Arc<dyn LanguageRepository>,
+        translation_loader: Arc<dyn TranslationLoader>,
+    ) -> Self {
+        Self {
+            language_repo,
+            translation_loader,
+        }
+    }
+}
+
+impl LanguageManagementUseCase for LanguageService {
+    fn get_current_language(&self) -> Result<Language, DomainError> {
+        self.language_repo
+            .get_language()
+            .map_err(DomainError::Repository)
+    }
+
+    fn set_language(&self, language: Language) -> Result<(), DomainError> {
+        self.language_repo
+            .set_language(&language)
+            .map_err(DomainError::Repository)
+    }
+
+    fn load_translations(
+        &self,
+        language: &Language,
+    ) -> Result<HashMap<String, String>, DomainError> {
+        Ok(self.translation_loader.load_translations(language))
+    }
+}
+
+// ============================================================================
+// DOMAIN ERRORS
+// ============================================================================
+
+#[derive(Debug, thiserror::Error)]
+pub enum DomainError {
+    #[error("Repository error: {0}")]
+    Repository(#[from] RepositoryError),
+    #[error("Invalid input: {message}")]
+    InvalidInput { message: String },
+    #[error("Operation failed: {message}")]
+    OperationFailed { message: String },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RepositoryError {
+    #[error("Database error: {0}")]
+    Database(#[from] DieselError),
+    #[error("Connection pool error: {0}")]
+    ConnectionPool(#[from] PoolError),
+    #[error("Not found")]
+    NotFound,
+}
+
+// ============================================================================
+// SECONDARY ADAPTERS - INFRASTRUCTURE (DRIVEN SIDE)
+// ============================================================================
+
+// Database Entities (Infrastructure concern)
 #[derive(Debug, Clone, PartialEq, Queryable, Identifiable)]
 #[diesel(table_name = file_categories)]
 struct FileCategoryEntity {
@@ -200,7 +477,7 @@ struct FileEntryEntity {
 }
 
 #[derive(Queryable)]
-struct FileWithInfo {
+struct FileWithMetadataDto {
     category_name: String,
     drive_name: String,
     path: String,
@@ -209,71 +486,343 @@ struct FileWithInfo {
 
 #[derive(Insertable)]
 #[diesel(table_name = file_categories)]
-struct NewFileCategory {
+struct NewFileCategoryDto {
     name: String,
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = drive_entries)]
-struct NewDriveEntry {
+struct NewDriveEntryDto {
     category_id: i32,
     name: String,
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = file_entries)]
-struct NewFileEntry {
+struct NewFileEntryDto {
     drive_id: i32,
     path: String,
     weight: i64,
 }
 
-impl From<FileWithInfo> for FileWithInfoModel {
-    fn from(value: FileWithInfo) -> Self {
-        Self {
-            category_name: value.category_name,
-            drive_name: value.drive_name,
-            path: value.path,
-            weight: value.weight,
-        }
+// Database Repository Implementation
+pub struct SqliteFileRepository {
+    pool: DieselPool,
+}
+
+impl SqliteFileRepository {
+    pub fn new(database_url: &str) -> Self {
+        let pool = Self::create_pool(database_url);
+        Self::enable_foreign_keys(&pool);
+        Self::run_migrations(&pool);
+        Self { pool }
+    }
+
+    fn create_pool(database_url: &str) -> DieselPool {
+        let manager = ConnectionManager::<SqliteConnection>::new(database_url);
+        Pool::builder()
+            .build(manager)
+            .expect("Failed to create SQLite pool")
+    }
+
+    fn enable_foreign_keys(pool: &DieselPool) {
+        let conn = &mut pool.get().expect("Failed to get connection");
+        diesel::sql_query("PRAGMA foreign_keys = ON")
+            .execute(conn)
+            .expect("Failed to enable foreign keys");
+    }
+
+    fn run_migrations(pool: &DieselPool) {
+        let mut conn = pool.get().expect("Failed to get connection");
+        conn.run_pending_migrations(MIGRATIONS)
+            .expect("Migration failed");
+    }
+}
+
+#[async_trait::async_trait]
+impl FileQueryRepository for SqliteFileRepository {
+    async fn find_files_paginated(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError> {
+        let pool = self.pool.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+
+                let total_count: i64 = file_entries::table.count().get_result(&mut conn)?;
+
+                let entities = file_entries::table
+                    .inner_join(drive_entries::table.inner_join(file_categories::table))
+                    .select((
+                        file_categories::name,
+                        drive_entries::name,
+                        file_entries::path,
+                        file_entries::weight,
+                    ))
+                    .limit(limit)
+                    .offset(offset)
+                    .load::<FileWithMetadataDto>(&mut conn)?;
+
+                let items = entities
+                    .into_iter()
+                    .map(|dto| FileWithMetadata {
+                        category_name: dto.category_name,
+                        drive_name: dto.drive_name,
+                        path: dto.path,
+                        size_bytes: dto.weight,
+                    })
+                    .collect();
+
+                Ok(PaginatedResult { items, total_count })
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn search_files_paginated(
+        &self,
+        query: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError> {
+        let pool = self.pool.clone();
+        let search_pattern = format!("%{}%", query.replace(" ", "_"));
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+
+                let total_count: i64 = file_entries::table
+                    .filter(file_entries::path.like(&search_pattern))
+                    .count()
+                    .get_result(&mut conn)?;
+
+                let entities = file_entries::table
+                    .inner_join(drive_entries::table.inner_join(file_categories::table))
+                    .select((
+                        file_categories::name,
+                        drive_entries::name,
+                        file_entries::path,
+                        file_entries::weight,
+                    ))
+                    .filter(file_entries::path.like(&search_pattern))
+                    .limit(limit)
+                    .offset(offset)
+                    .load::<FileWithMetadataDto>(&mut conn)?;
+
+                let items = entities
+                    .into_iter()
+                    .map(|dto| FileWithMetadata {
+                        category_name: dto.category_name,
+                        drive_name: dto.drive_name,
+                        path: dto.path,
+                        size_bytes: dto.weight,
+                    })
+                    .collect();
+
+                Ok(PaginatedResult { items, total_count })
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn count_search_results(&self, query: &str) -> Result<i64, RepositoryError> {
+        let pool = self.pool.clone();
+        let search_pattern = format!("%{}%", query.replace(" ", "_"));
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+                let count = file_entries::table
+                    .filter(file_entries::path.like(&search_pattern))
+                    .count()
+                    .get_result(&mut conn)?;
+                Ok(count)
+            })
+            .await
+            .unwrap()
+    }
+}
+
+#[async_trait::async_trait]
+impl FileCommandRepository for SqliteFileRepository {
+    async fn save_category(&self, category: Category) -> Result<i32, RepositoryError> {
+        let pool = self.pool.clone();
+        let category_name = category.name;
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+                let id = diesel::insert_into(file_categories::table)
+                    .values(NewFileCategoryDto {
+                        name: category_name,
+                    })
+                    .returning(file_categories::id)
+                    .get_result(&mut conn)?;
+                Ok(id)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn save_drive(&self, drive: Drive, category_id: i32) -> Result<i32, RepositoryError> {
+        let pool = self.pool.clone();
+        let drive_name = drive.name;
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+                let id = diesel::insert_into(drive_entries::table)
+                    .values(NewDriveEntryDto {
+                        category_id,
+                        name: drive_name,
+                    })
+                    .returning(drive_entries::id)
+                    .get_result(&mut conn)?;
+                Ok(id)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn save_files(
+        &self,
+        drive_id: i32,
+        files: Vec<FileEntry>,
+    ) -> Result<(), RepositoryError> {
+        let pool = self.pool.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+                let dto_files: Vec<NewFileEntryDto> = files
+                    .into_iter()
+                    .map(|f| NewFileEntryDto {
+                        drive_id,
+                        path: f.path,
+                        weight: f.size_bytes,
+                    })
+                    .collect();
+
+                conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
+                    diesel::insert_into(file_entries::table)
+                        .values(&dto_files)
+                        .execute(conn)?;
+                    Ok(())
+                })?;
+                Ok(())
+            })
+            .await
+            .unwrap()
+    }
+}
+
+// Implement language repository interface
+impl LanguageRepository for SqliteFileRepository {
+    fn get_language(&self) -> Result<Language, RepositoryError> {
+        let mut conn = self.pool.get()?;
+        let lang: Option<String> = settings::table
+            .filter(settings::key.eq("language"))
+            .select(settings::value)
+            .first(&mut conn)
+            .optional()?;
+
+        Ok(lang
+            .map(|l| Language::new(&l))
+            .unwrap_or_else(Language::english))
+    }
+
+    fn set_language(&self, language: &Language) -> Result<(), RepositoryError> {
+        let mut conn = self.pool.get()?;
+        diesel::replace_into(settings::table)
+            .values((
+                settings::key.eq("language"),
+                settings::value.eq(language.code()),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+}
+
+// Translation Loader Implementation
+pub struct JsonTranslationLoader;
+
+impl TranslationLoader for JsonTranslationLoader {
+    fn load_translations(&self, language: &Language) -> HashMap<String, String> {
+        let data = match language.code() {
+            "fr" => include_str!("../translations/fr.json"),
+            "en" | _ => include_str!("../translations/en.json"),
+        };
+        serde_json::from_str(data).unwrap_or_default()
+    }
+}
+
+// Directory Picker Implementation
+pub struct NativeDirectoryPicker;
+
+#[async_trait::async_trait]
+impl DirectoryPicker for NativeDirectoryPicker {
+    async fn pick_directory(&self) -> Option<PathBuf> {
+        AsyncFileDialog::new()
+            .set_title("Select Directory to Index")
+            .pick_folder()
+            .await
+            .map(|handle| handle.path().to_path_buf())
     }
 }
 
 // ============================================================================
-// ERROR HANDLING
+// PRIMARY ADAPTERS - USER INTERFACE (DRIVING SIDE)
 // ============================================================================
 
-#[derive(Debug, thiserror::Error)]
-enum RepositoryError {
-    #[error("DB error: {0}")]
-    Diesel(#[from] DieselError),
-
-    #[error("Pool error: {0}")]
-    Pool(#[from] PoolError),
+// Application Messages (UI Events)
+#[derive(Clone, Debug)]
+enum AppMessage {
+    ChangeLanguage(Language),
+    LanguageChanged(Language, HashMap<String, String>),
+    GoToRead,
+    GoToWrite,
+    Read(ReadMessage),
+    Write(WriteMessage),
 }
 
-type RepositoryResult<T> = Result<T, RepositoryError>;
-
-#[derive(Debug, thiserror::Error)]
-enum ServiceError {
-    #[error("Repository error: {0}")]
-    Repo(#[from] RepositoryError),
+#[derive(Clone, Debug)]
+enum ReadMessage {
+    FirstPage,
+    PrevPage,
+    PageInputChanged(String),
+    PageInputSubmit,
+    NextPage,
+    LastPage,
+    SearchSubmit,
+    ContentChanged(String),
+    SearchClear,
+    FilesLoaded((u64, PaginatedResult<FileWithMetadata>)),
 }
 
-type ServiceResult<T> = Result<T, ServiceError>;
-
-// ============================================================================
-// TRANSLATION SYSTEM
-// ============================================================================
-
-fn load_translations(lang: &Language) -> HashMap<String, String> {
-    let data = match lang {
-        Language::French => include_str!("../translations/fr.json"),
-        Language::English => include_str!("../translations/en.json"),
-    };
-    serde_json::from_str(data).unwrap()
+#[derive(Clone, Debug)]
+enum WriteMessage {
+    CategoryChanged(String),
+    CategorySubmit,
+    DriveChanged(String),
+    DriveSubmit,
+    DirectoryPressed,
+    DirectoryChanged(Option<PathBuf>),
+    WriteSubmit,
+    IndexingFinished(usize),
+    ResetForm,
 }
 
+// UI Application State
+enum Page {
+    Read(ReadPage),
+    Write(WritePage),
+}
+
+// Translation Helper
 macro_rules! tr {
     ($translations:expr, $key:expr) => {
         tr_impl($translations, $key, &[])
@@ -296,336 +845,25 @@ fn tr_impl(translations: &HashMap<String, String>, key: &str, params: &[(&str, &
     text
 }
 
-// ============================================================================
-// FILE SYSTEM UTILITIES
-// ============================================================================
-
-async fn walk_directory(path: PathBuf) -> Vec<FileEntryModel> {
-    TOKIO_RUNTIME
-        .handle()
-        .spawn_blocking(move || {
-            WalkDir::new(&path)
-                .sort_by_file_name()
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-                .map(|e| file_info(&path, e.path()))
-                .collect()
-        })
-        .await
-        .unwrap()
-}
-
-fn file_info(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> FileEntryModel {
-    FileEntryModel {
-        path: file_path(chosen_directory_path, absolute_file_path),
-        weight: weight(absolute_file_path),
-    }
-}
-
-fn file_path(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> String {
-    absolute_file_path
-        .strip_prefix(chosen_directory_path)
-        .expect("File not under chosen directory")
-        .to_path_buf()
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn weight(path: &Path) -> i64 {
-    fs::metadata(path)
-        .expect("Cannot access file metadata")
-        .len() as i64
-}
-
-// ============================================================================
-// DATABASE LAYER
-// ============================================================================
-
-fn get_connection_pool(database_url: &str) -> DieselPool {
-    let pool = create_pool(database_url);
-    enable_foreign_keys_constraints(&pool);
-    run_migrations(&pool);
-    pool
-}
-
-fn create_pool(database_url: &str) -> Pool<ConnectionManager<SqliteConnection>> {
-    let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-    let pool = Pool::builder()
-        .build(manager)
-        .expect("Failed to create SQLite pool");
-    pool
-}
-
-fn enable_foreign_keys_constraints(pool: &Pool<ConnectionManager<SqliteConnection>>) {
-    let conn = &mut pool.get().expect("Failed to get connection from pool");
-    diesel::sql_query("PRAGMA foreign_keys = ON")
-        .execute(conn)
-        .expect("Failed to enable foreign keys");
-}
-
-fn run_migrations(pool: &DieselPool) {
-    let mut conn = pool.get().expect("Failed to get connection from pool");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Migration failed");
-}
-
-// ============================================================================
-// REPOSITORY LAYER
-// ============================================================================
-
-#[derive(Clone)]
-struct ListerRepository {
-    pool: DieselPool,
-}
-
-impl ListerRepository {
-    fn new(pool: DieselPool) -> Self {
-        ListerRepository { pool }
-    }
-
-    fn add_category(&self, category: NewFileCategory) -> RepositoryResult<i32> {
-        let mut conn = self.pool.get()?;
-        let id = diesel::insert_into(file_categories::table)
-            .values(category)
-            .returning(file_categories::id)
-            .get_result(&mut conn)?;
-        Ok(id)
-    }
-
-    fn add_drive(&self, drive: NewDriveEntry) -> RepositoryResult<i32> {
-        let mut conn = self.pool.get()?;
-        let id = diesel::insert_into(drive_entries::table)
-            .values(drive)
-            .returning(drive_entries::id)
-            .get_result(&mut conn)?;
-        Ok(id)
-    }
-
-    fn add_files(&self, files: Vec<NewFileEntry>) -> RepositoryResult<()> {
-        let mut conn = self.pool.get()?;
-        conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
-            diesel::insert_into(file_entries::table)
-                .values(&files)
-                .execute(conn)?;
-            Ok(())
-        })?;
-        Ok(())
-    }
-
-    fn find_files_paginated(&self, offset: i64, limit: i64) -> RepositoryResult<PaginatedFiles> {
-        let mut conn = self.pool.get()?;
-
-        let total_count: i64 = file_entries::table.count().get_result(&mut conn)?;
-
-        let entities = file_entries::table
-            .inner_join(drive_entries::table.inner_join(file_categories::table))
-            .select((
-                file_categories::name,
-                drive_entries::name,
-                file_entries::path,
-                file_entries::weight,
-            ))
-            .limit(limit)
-            .offset(offset)
-            .load::<FileWithInfo>(&mut conn)?;
-
-        let files = entities.into_iter().map(|e| e.into()).collect();
-
-        Ok(PaginatedFiles { files, total_count })
-    }
-
-    fn search_files_paginated(
-        &self,
-        search_query: &str,
-        offset: i64,
-        limit: i64,
-    ) -> RepositoryResult<PaginatedFiles> {
-        let mut conn = self.pool.get()?;
-        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
-
-        let total_count: i64 = file_entries::table
-            .filter(file_entries::path.like(&search_pattern))
-            .count()
-            .get_result(&mut conn)?;
-
-        let entities = file_entries::table
-            .inner_join(drive_entries::table.inner_join(file_categories::table))
-            .select((
-                file_categories::name,
-                drive_entries::name,
-                file_entries::path,
-                file_entries::weight,
-            ))
-            .filter(file_entries::path.like(&search_pattern))
-            .limit(limit)
-            .offset(offset)
-            .load::<FileWithInfo>(&mut conn)?;
-
-        let files = entities.into_iter().map(|e| e.into()).collect();
-        Ok(PaginatedFiles { files, total_count })
-    }
-
-    fn get_search_count(&self, search_query: &str) -> RepositoryResult<i64> {
-        let mut conn = self.pool.get()?;
-        let search_pattern = format!("%{}%", search_query.replace(" ", "_"));
-        let count = file_entries::table
-            .filter(file_entries::path.like(&search_pattern))
-            .count()
-            .get_result(&mut conn)?;
-        Ok(count)
-    }
-
-    fn get_language(&self) -> RepositoryResult<Language> {
-        let mut conn = self.pool.get()?;
-        let lang: Option<String> = settings::table
-            .filter(settings::key.eq("language"))
-            .select(settings::value)
-            .first(&mut conn)
-            .optional()?;
-
-        let lang = lang.map(|l| Language::from_string(&l));
-
-        Ok(lang.unwrap_or_else(|| Language::English))
-    }
-
-    fn set_language(&self, lang: &Language) -> RepositoryResult<()> {
-        let mut conn = self.pool.get()?;
-        diesel::replace_into(settings::table)
-            .values((
-                settings::key.eq("language"),
-                settings::value.eq(lang.to_string()),
-            ))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-}
-
-// ============================================================================
-// SERVICE LAYER
-// ============================================================================
-
-struct ListerService {
-    repo: ListerRepository,
-}
-
-impl ListerService {
-    fn new(repo: ListerRepository) -> Self {
-        ListerService { repo }
-    }
-
-    async fn add_category(&self, category_name: NewFileCategory) -> ServiceResult<i32> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.add_category(category_name))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn add_drive(&self, drive: NewDriveEntry) -> ServiceResult<i32> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.add_drive(drive))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn add_files(&self, drive_id: i32, files: Vec<FileEntryModel>) -> ServiceResult<()> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                repo.add_files(
-                    files
-                        .into_iter()
-                        .map(|f| f.into_new_file_entry(drive_id))
-                        .collect(),
-                )
-            })
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn find_files_paginated(&self, offset: i64, limit: i64) -> ServiceResult<PaginatedFiles> {
-        let repo = self.repo.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.find_files_paginated(offset, limit))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn search_files_paginated(
-        &self,
-        search_query: &str,
-        offset: i64,
-        limit: i64,
-    ) -> ServiceResult<PaginatedFiles> {
-        let repo = self.repo.clone();
-        let query = search_query.to_string();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.search_files_paginated(&query, offset, limit))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    async fn get_search_count(&self, search_query: &str) -> ServiceResult<i64> {
-        let repo = self.repo.clone();
-        let query = search_query.to_string();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || repo.get_search_count(&query))
-            .await
-            .unwrap()
-            .map_err(ServiceError::Repo)
-    }
-
-    fn get_language(&self) -> ServiceResult<Language> {
-        let repo = self.repo.clone();
-        repo.get_language().map_err(ServiceError::Repo)
-    }
-
-    fn load_translations(&self) -> ServiceResult<HashMap<String, String>> {
-        self.get_language().map(|l| load_translations(&l))
-    }
-
-    fn set_language(&self, lang: Language) -> ServiceResult<()> {
-        let repo = self.repo.clone();
-        repo.set_language(&lang).map_err(ServiceError::Repo)
-    }
-}
-
-// ============================================================================
-// READ PAGE IMPLEMENTATION
-// ============================================================================
-
+// Read Page (File Listing and Search)
 struct ReadPage {
-    service: Arc<ListerService>,
+    query_use_case: Arc<dyn FileQueryUseCase>,
     search_query: String,
-    current_files: Vec<FileWithInfoModel>,
+    current_files: Vec<FileWithMetadata>,
     cached_query: Option<String>,
-    cached_results: Option<Vec<FileWithInfoModel>>,
+    cached_results: Option<Vec<FileWithMetadata>>,
     page_input_value: String,
     total_count: i64,
     current_page_index: usize,
-
     active_task_id: u64,
     search_input_id: text_input::Id,
     scroll_bar_id: scrollable::Id,
 }
 
 impl ReadPage {
-    fn new(service: Arc<ListerService>) -> (Self, Task<ReadMessage>) {
+    fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
         let mut page = Self {
-            service,
+            query_use_case,
             search_query: String::new(),
             current_files: Vec::new(),
             cached_query: None,
@@ -646,6 +884,7 @@ impl ReadPage {
     }
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {
+        // Use cached results if available
         if let (Some(cached), Some(query)) = (&self.cached_results, &self.cached_query) {
             if *query == self.search_query {
                 let start = self.current_page_index * ITEMS_PER_PAGE;
@@ -659,34 +898,17 @@ impl ReadPage {
         self.active_task_id += 1;
         let task_id = self.active_task_id;
         let search_query = self.search_query.clone();
-        let service = self.service.clone();
-        let offset = (self.current_page_index * ITEMS_PER_PAGE) as i64;
+        let query_use_case = self.query_use_case.clone();
+        let page = self.current_page_index;
 
         Task::perform(
             async move {
-                let result: ServiceResult<PaginatedFiles> = if search_query.is_empty() {
-                    service
-                        .find_files_paginated(offset, ITEMS_PER_PAGE as i64)
-                        .await
+                let result = if search_query.is_empty() {
+                    query_use_case.list_files(page, ITEMS_PER_PAGE).await
                 } else {
-                    match service.get_search_count(&search_query).await {
-                        Ok(count) => {
-                            if count <= CACHED_SIZE {
-                                service
-                                    .search_files_paginated(&search_query, 0, count)
-                                    .await
-                            } else {
-                                service
-                                    .search_files_paginated(
-                                        &search_query,
-                                        offset,
-                                        ITEMS_PER_PAGE as i64,
-                                    )
-                                    .await
-                            }
-                        }
-                        Err(e) => Err(e),
-                    }
+                    query_use_case
+                        .search_files(&search_query, page, ITEMS_PER_PAGE)
+                        .await
                 };
                 (task_id, result)
             },
@@ -698,8 +920,8 @@ impl ReadPage {
 
     fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
         let search_section = self.search_section(translations);
-        let files = self.files();
-        let pagination_section = self.create_pagination_section(translations);
+        let files = self.files_section();
+        let pagination_section = self.pagination_section(translations);
 
         column![search_section, files, pagination_section]
             .spacing(20)
@@ -730,7 +952,7 @@ impl ReadPage {
         column![row![search_input, search_button, clear_button].spacing(10)].into()
     }
 
-    fn files(&'_ self) -> Element<'_, ReadMessage> {
+    fn files_section(&'_ self) -> Element<'_, ReadMessage> {
         let file_rows: Vec<Element<'_, ReadMessage>> = self
             .current_files
             .iter()
@@ -738,9 +960,10 @@ impl ReadPage {
                 row![
                     text(&file.category_name).width(Length::FillPortion(1)),
                     text(&file.drive_name).width(Length::FillPortion(2)),
-                    text(file.parent_dir()).width(Length::FillPortion(3)),
-                    text(file.file_name()).width(Length::FillPortion(4)),
-                    text(format_size(file.weight as u64, DECIMAL)).width(Length::FillPortion(1))
+                    text(file.parent_directory()).width(Length::FillPortion(3)),
+                    text(file.filename()).width(Length::FillPortion(4)),
+                    text(format_size(file.size_bytes as u64, DECIMAL))
+                        .width(Length::FillPortion(1))
                 ]
                 .padding(3)
                 .into()
@@ -757,7 +980,7 @@ impl ReadPage {
         .into()
     }
 
-    fn create_pagination_section(
+    fn pagination_section(
         &self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, ReadMessage> {
@@ -855,134 +1078,122 @@ impl ReadPage {
 
     fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
         match message {
-            ReadMessage::PrevPage => self.previous_page(),
-            ReadMessage::NextPage => self.next_page(),
-            ReadMessage::SearchSubmit => self.search(),
-            ReadMessage::SearchClear => self.clear_search(),
-            ReadMessage::ContentChanged(content) => self.content_changed(content),
-            ReadMessage::FirstPage => self.first_page(),
-            ReadMessage::LastPage => self.last_page(),
-            ReadMessage::PageInputChanged(page_number) => self.page_input_changed(page_number),
-            ReadMessage::PageInputSubmit => self.go_to_page(),
-            ReadMessage::FilesLoaded((task_id, result)) => self.files_loaded(task_id, result),
-        }
-    }
-
-    fn previous_page(&mut self) -> Task<ReadMessage> {
-        if self.current_page_index > 0 {
-            self.current_page_index -= 1;
-            return self.load_current_page();
-        }
-        Task::none()
-    }
-
-    fn next_page(&mut self) -> Task<ReadMessage> {
-        let total_pages = self.total_pages();
-        if self.current_page_index + 1 < total_pages {
-            self.current_page_index += 1;
-            return self.load_current_page();
-        }
-        Task::none()
-    }
-
-    fn search(&mut self) -> Task<ReadMessage> {
-        self.current_page_index = 0;
-        self.load_current_page()
-    }
-
-    fn clear_search(&mut self) -> Task<ReadMessage> {
-        self.search_query = String::new();
-        self.current_page_index = 0;
-        self.load_current_page()
-    }
-
-    fn content_changed(&mut self, content: String) -> Task<ReadMessage> {
-        self.search_query = content;
-        Task::none()
-    }
-
-    fn first_page(&mut self) -> Task<ReadMessage> {
-        self.current_page_index = 0;
-        self.load_current_page()
-    }
-
-    fn last_page(&mut self) -> Task<ReadMessage> {
-        self.current_page_index = self.total_pages() - 1;
-        self.load_current_page()
-    }
-
-    fn page_input_changed(&mut self, page_number: String) -> Task<ReadMessage> {
-        self.page_input_value = page_number;
-        Task::none()
-    }
-
-    fn go_to_page(&mut self) -> Task<ReadMessage> {
-        if let Ok(query) = self.page_input_value.parse::<usize>() {
-            if query > 0 && query <= self.total_pages() {
-                self.current_page_index = query - 1;
-                return self.load_current_page();
+            ReadMessage::PrevPage => {
+                self.navigate_to_page(self.current_page_index.saturating_sub(1))
+            }
+            ReadMessage::NextPage => {
+                let total_pages = self.total_pages();
+                if self.current_page_index + 1 < total_pages {
+                    self.navigate_to_page(self.current_page_index + 1)
+                } else {
+                    Task::none()
+                }
+            }
+            ReadMessage::FirstPage => self.navigate_to_page(0),
+            ReadMessage::LastPage => self.navigate_to_page(self.total_pages().saturating_sub(1)),
+            ReadMessage::SearchSubmit => {
+                self.current_page_index = 0;
+                self.load_current_page()
+            }
+            ReadMessage::SearchClear => {
+                self.search_query.clear();
+                self.current_page_index = 0;
+                self.load_current_page()
+            }
+            ReadMessage::ContentChanged(content) => {
+                self.search_query = content;
+                Task::none()
+            }
+            ReadMessage::PageInputChanged(page_number) => {
+                self.page_input_value = page_number;
+                Task::none()
+            }
+            ReadMessage::PageInputSubmit => {
+                if let Ok(page) = self.page_input_value.parse::<usize>() {
+                    if page > 0 && page <= self.total_pages() {
+                        self.navigate_to_page(page - 1)
+                    } else {
+                        Task::none()
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            ReadMessage::FilesLoaded((task_id, result)) => {
+                self.handle_files_loaded(task_id, result)
             }
         }
-        Task::none()
     }
 
-    fn files_loaded(&mut self, task_id: u64, result: PaginatedFiles) -> Task<ReadMessage> {
-        let task = if task_id == self.active_task_id {
-            self.process_loaded_files(result)
-        } else {
-            Task::none()
-        };
-        task.chain(text_input::focus(self.search_input_id.clone()))
+    fn navigate_to_page(&mut self, page_index: usize) -> Task<ReadMessage> {
+        self.current_page_index = page_index;
+        self.load_current_page()
     }
 
-    fn process_loaded_files(&mut self, result: PaginatedFiles) -> Task<ReadMessage> {
+    fn handle_files_loaded(
+        &mut self,
+        task_id: u64,
+        result: PaginatedResult<FileWithMetadata>,
+    ) -> Task<ReadMessage> {
+        if task_id != self.active_task_id {
+            return Task::none();
+        }
+
+        self.process_loaded_files(result)
+            .chain(text_input::focus(self.search_input_id.clone()))
+    }
+
+    fn process_loaded_files(
+        &mut self,
+        result: PaginatedResult<FileWithMetadata>,
+    ) -> Task<ReadMessage> {
         if result.total_count <= CACHED_SIZE && !self.search_query.is_empty() {
-            self.cached_results = Some(result.files.clone());
+            self.cached_results = Some(result.items.clone());
             self.cached_query = Some(self.search_query.clone());
             let start = self.current_page_index * ITEMS_PER_PAGE;
-            let end = (start + ITEMS_PER_PAGE).min(result.files.len());
-            self.current_files = result.files[start..end].to_vec();
-            self.total_count = result.files.len() as i64;
+            let end = (start + ITEMS_PER_PAGE).min(result.items.len());
+            self.current_files = result.items[start..end].to_vec();
+            self.total_count = result.items.len() as i64;
         } else {
-            self.current_files = result.files;
+            self.current_files = result.items;
             self.total_count = result.total_count;
             self.cached_results = None;
             self.cached_query = None;
         }
+
         scrollable::snap_to(self.scroll_bar_id.clone(), RelativeOffset::START)
     }
 }
 
-// ============================================================================
-// WRITE PAGE IMPLEMENTATION
-// ============================================================================
-
+// Write Page (Directory Indexing)
 struct WritePage {
-    service: Arc<ListerService>,
+    indexing_use_case: Arc<dyn FileIndexingUseCase>,
+    directory_picker: Arc<dyn DirectoryPicker>,
     category: String,
     drive: String,
     directory: Option<PathBuf>,
-
-    is_walking_directory: bool,
-    is_inserting_in_database: bool,
+    is_indexing: bool,
     is_finished: bool,
-    nb_files_inserted: usize,
+    files_indexed: usize,
     category_input_id: text_input::Id,
     drive_input_id: text_input::Id,
 }
 
 impl WritePage {
-    fn new(service: Arc<ListerService>) -> (Self, Task<WriteMessage>) {
+    fn new(
+        indexing_use_case: Arc<dyn FileIndexingUseCase>,
+        directory_picker: Arc<dyn DirectoryPicker>,
+    ) -> (Self, Task<WriteMessage>) {
         let category_input_id = text_input::Id::unique();
         let page = Self {
-            service,
-            category: "".to_string(),
-            drive: "".to_string(),
+            indexing_use_case,
+            directory_picker,
+            category: String::new(),
+            drive: String::new(),
             directory: None,
-            is_walking_directory: false,
-            is_inserting_in_database: false,
+            is_indexing: false,
             is_finished: false,
-            nb_files_inserted: 0,
+            files_indexed: 0,
             category_input_id: category_input_id.clone(),
             drive_input_id: text_input::Id::unique(),
         };
@@ -994,9 +1205,9 @@ impl WritePage {
     }
 
     fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
-        let form_section = self.create_form_section(translations);
-        let action_section = self.create_action_section(translations);
-        let status_section = self.create_status_section(translations);
+        let form_section = self.form_section(translations);
+        let action_section = self.action_section(translations);
+        let status_section = self.status_section(translations);
 
         column![form_section, action_section, status_section]
             .spacing(20)
@@ -1004,10 +1215,7 @@ impl WritePage {
             .into()
     }
 
-    fn create_form_section(
-        &'_ self,
-        translations: &HashMap<String, String>,
-    ) -> Element<'_, WriteMessage> {
+    fn form_section(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
         let category_input = text_input(&tr!(translations, "category_placeholder"), &self.category)
             .on_input(WriteMessage::CategoryChanged)
             .id(self.category_input_id.clone())
@@ -1022,7 +1230,7 @@ impl WritePage {
             .padding(10)
             .width(Length::Fill);
 
-        let directory_section = self.create_directory_section(translations);
+        let directory_section = self.directory_section(translations);
 
         column![
             text(tr!(translations, "file_indexing_setup"))
@@ -1041,7 +1249,7 @@ impl WritePage {
         .into()
     }
 
-    fn create_directory_section(
+    fn directory_section(
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
@@ -1069,15 +1277,11 @@ impl WritePage {
         .into()
     }
 
-    fn create_action_section(
+    fn action_section(
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
-        let can_submit = !self.category.is_empty()
-            && !self.drive.is_empty()
-            && self.directory.is_some()
-            && !self.is_walking_directory
-            && !self.is_inserting_in_database;
+        let can_submit = self.form_is_complete() && !self.is_indexing;
 
         let submit_button = button(text(tr!(translations, "start_indexing")))
             .on_press_maybe(if can_submit {
@@ -1093,43 +1297,33 @@ impl WritePage {
                 button::text
             });
 
-        let requirements_text =
-            if !can_submit && !self.is_walking_directory && !self.is_inserting_in_database {
-                text(tr!(translations, "fill_all_fields"))
-                    .style(text::secondary)
-                    .size(12)
-            } else {
-                text("")
-            };
+        let requirements_text = if !can_submit && !self.is_indexing {
+            text(tr!(translations, "fill_all_fields"))
+                .style(text::secondary)
+                .size(12)
+        } else {
+            text("")
+        };
 
         column![Rule::horizontal(1), submit_button, requirements_text,]
             .spacing(10)
             .into()
     }
 
-    fn create_status_section(
+    fn status_section(
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
-        if !self.is_walking_directory && !self.is_inserting_in_database && !self.is_finished {
+        if !self.is_indexing && !self.is_finished {
             return column![].into();
         }
 
-        let status_content = if self.is_walking_directory {
+        let status_content = if self.is_indexing {
             column![
-                text(tr!(translations, "scan_status"))
+                text(tr!(translations, "indexing_status"))
                     .size(18)
                     .style(text::primary),
-                text(tr!(translations, "scan_details"))
-                    .style(text::secondary)
-                    .size(14),
-            ]
-        } else if self.is_inserting_in_database {
-            column![
-                text(tr!(translations, "save_status"))
-                    .size(18)
-                    .style(text::primary),
-                text(tr!(translations, "save_details"))
+                text(tr!(translations, "indexing_details"))
                     .style(text::secondary)
                     .size(14),
             ]
@@ -1138,9 +1332,11 @@ impl WritePage {
                 text(tr!(translations, "done_status"))
                     .size(18)
                     .style(text::success),
-                text(tr!(translations, "done_details", "nb_files" => &self.nb_files_inserted.to_string()))
-                    .style(text::success)
-                    .size(14),
+                text(
+                    tr!(translations, "done_details", "nb_files" => &self.files_indexed.to_string())
+                )
+                .style(text::success)
+                .size(14),
                 button(text(tr!(translations, "start_new_indexing")))
                     .on_press(WriteMessage::ResetForm)
                     .padding(10)
@@ -1155,139 +1351,116 @@ impl WritePage {
             .into()
     }
 
+    fn form_is_complete(&self) -> bool {
+        !self.category.is_empty() && !self.drive.is_empty() && self.directory.is_some()
+    }
+
     fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
         match message {
-            WriteMessage::CategoryChanged(result) => self.category_changed(result),
-            WriteMessage::CategorySubmit => self.category_submit(),
-            WriteMessage::DriveChanged(result) => self.drive_changed(result),
-            WriteMessage::DriveSubmit => self.drive_submit(),
-            WriteMessage::DirectoryPressed => Self::choose_directory(),
-            WriteMessage::DirectoryChanged(result) => self.directory_changed(result),
-            WriteMessage::WriteSubmit => self.walk_directory(),
-            WriteMessage::WalkFinished(files) => self.insert_in_database(files),
-            WriteMessage::InsertFinished(nb_files) => self.insert_finished(nb_files),
-            WriteMessage::ResetForm => self.reset_form(),
+            WriteMessage::CategoryChanged(value) => {
+                self.category = value;
+                Task::none()
+            }
+            WriteMessage::CategorySubmit => text_input::focus(self.drive_input_id.clone()),
+            WriteMessage::DriveChanged(value) => {
+                self.drive = value;
+                Task::none()
+            }
+            WriteMessage::DriveSubmit => text_input::focus(self.category_input_id.clone()),
+            WriteMessage::DirectoryPressed => {
+                let picker = self.directory_picker.clone();
+                Task::perform(
+                    async move { picker.pick_directory().await },
+                    WriteMessage::DirectoryChanged,
+                )
+            }
+            WriteMessage::DirectoryChanged(directory) => {
+                self.directory = directory;
+                Task::none()
+            }
+            WriteMessage::WriteSubmit => self.start_indexing(),
+            WriteMessage::IndexingFinished(count) => {
+                self.is_indexing = false;
+                self.is_finished = true;
+                self.files_indexed = count;
+                Task::none()
+            }
+            WriteMessage::ResetForm => {
+                self.category.clear();
+                self.drive.clear();
+                self.directory = None;
+                self.is_indexing = false;
+                self.is_finished = false;
+                self.files_indexed = 0;
+                text_input::focus(self.category_input_id.clone())
+            }
         }
     }
 
-    fn category_changed(&mut self, result: String) -> Task<WriteMessage> {
-        self.category = result;
-        Task::none()
-    }
-
-    fn category_submit(&mut self) -> Task<WriteMessage> {
-        text_input::focus(self.drive_input_id.clone())
-    }
-
-    fn drive_changed(&mut self, result: String) -> Task<WriteMessage> {
-        self.drive = result;
-        Task::none()
-    }
-
-    fn drive_submit(&mut self) -> Task<WriteMessage> {
-        text_input::focus(self.category_input_id.clone())
-    }
-
-    fn choose_directory() -> Task<WriteMessage> {
-        Task::perform(
-            async {
-                AsyncFileDialog::new()
-                    .set_title("Select Directory to Index")
-                    .pick_folder()
-                    .await
-                    .map(|handle| handle.path().to_path_buf())
-            },
-            WriteMessage::DirectoryChanged,
-        )
-    }
-
-    fn directory_changed(&mut self, result: Option<PathBuf>) -> Task<WriteMessage> {
-        self.directory = result;
-        Task::none()
-    }
-
-    fn walk_directory(&mut self) -> Task<WriteMessage> {
-        self.is_walking_directory = true;
-        if let Some(directory) = self.directory.clone() {
-            return Task::perform(
-                async { walk_directory(directory).await },
-                WriteMessage::WalkFinished,
-            );
+    fn start_indexing(&mut self) -> Task<WriteMessage> {
+        if !self.form_is_complete() || self.is_indexing {
+            return Task::none();
         }
-        Task::none()
-    }
 
-    fn insert_in_database(&mut self, files: Vec<FileEntryModel>) -> Task<WriteMessage> {
-        self.is_walking_directory = false;
-        self.is_inserting_in_database = true;
+        self.is_indexing = true;
+        let indexing_use_case = self.indexing_use_case.clone();
         let category = self.category.clone();
         let drive = self.drive.clone();
-        let service = self.service.clone();
+        let directory = self.directory.clone().unwrap();
+
         Task::perform(
             async move {
-                let category_id = service
-                    .add_category(NewFileCategory { name: category })
-                    .await?;
-                let drive_id = service
-                    .add_drive(NewDriveEntry {
-                        category_id,
-                        name: drive,
-                    })
-                    .await?;
-                let nb_files = files.len();
-                service.add_files(drive_id, files).await?;
-                Ok::<usize, ServiceError>(nb_files)
+                indexing_use_case
+                    .index_directory(category, drive, directory)
+                    .await
+                    .unwrap_or(0)
             },
-            |result| WriteMessage::InsertFinished(result.unwrap()),
+            WriteMessage::IndexingFinished,
         )
-    }
-
-    fn insert_finished(&mut self, nb_files: usize) -> Task<WriteMessage> {
-        self.is_inserting_in_database = false;
-        self.is_finished = true;
-        self.nb_files_inserted = nb_files;
-        Task::none()
-    }
-
-    fn reset_form(&mut self) -> Task<WriteMessage> {
-        self.category = String::new();
-        self.drive = String::new();
-        self.directory = None;
-        self.is_walking_directory = false;
-        self.is_inserting_in_database = false;
-        self.is_finished = false;
-        text_input::focus(self.category_input_id.clone())
     }
 }
 
-// ============================================================================
-// MAIN APPLICATION
-// ============================================================================
-
+// Main Application
 struct ListerApp {
-    service: Arc<ListerService>,
+    query_use_case: Arc<dyn FileQueryUseCase>,
+    indexing_use_case: Arc<dyn FileIndexingUseCase>,
+    language_use_case: Arc<dyn LanguageManagementUseCase>,
+    directory_picker: Arc<dyn DirectoryPicker>,
     current_language: Language,
     translations: HashMap<String, String>,
     current_page: Page,
 }
 
-fn init_back_end() -> Arc<ListerService> {
-    let pool = get_connection_pool("app.db");
-    Arc::new(ListerService::new(ListerRepository::new(pool)))
-}
-
 impl ListerApp {
     fn new() -> (Self, Task<AppMessage>) {
-        let service = init_back_end();
-        let (page, task) = ReadPage::new(service.clone());
+        // Create the single repository instance
+        let repository = Arc::new(SqliteFileRepository::new("app.db"));
+        let translation_loader = Arc::new(JsonTranslationLoader);
+        let directory_picker = Arc::new(NativeDirectoryPicker);
 
-        let language = service.get_language().unwrap();
+        let query_service = Arc::new(FileQueryService::new(repository.clone()));
+        let indexing_service = Arc::new(FileIndexingService::new(repository.clone()));
+        let language_service =
+            Arc::new(LanguageService::new(repository.clone(), translation_loader));
+
+        let current_language = language_service
+            .get_current_language()
+            .unwrap_or_else(|_| Language::english());
+        let translations = language_service
+            .load_translations(&current_language)
+            .unwrap_or_default();
+
+        let (read_page, task) = ReadPage::new(query_service.clone());
+
         (
             Self {
-                service,
-                current_language: language.clone(),
-                translations: load_translations(&language),
-                current_page: Page::Read(page),
+                query_use_case: query_service,
+                indexing_use_case: indexing_service,
+                language_use_case: language_service,
+                directory_picker,
+                current_language,
+                translations,
+                current_page: Page::Read(read_page),
             },
             task.map(AppMessage::Read),
         )
@@ -1295,8 +1468,8 @@ impl ListerApp {
 
     fn title(&self) -> String {
         match &self.current_page {
-            Page::Read(read_page) => read_page.title(&self.translations),
-            Page::Write(write_page) => write_page.title(&self.translations),
+            Page::Read(page) => page.title(&self.translations),
+            Page::Write(page) => page.title(&self.translations),
         }
     }
 
@@ -1315,7 +1488,7 @@ impl ListerApp {
     }
 
     fn nav_bar(&'_ self) -> Row<'_, AppMessage> {
-        let nav_bar = row![
+        row![
             button(text(tr!(&self.translations, "read_page")).align_x(Alignment::Center))
                 .on_press(AppMessage::GoToRead)
                 .style(match &self.current_page {
@@ -1331,104 +1504,84 @@ impl ListerApp {
                 })
                 .width(Length::Fill)
         ]
-        .spacing(10);
-        nav_bar
+        .spacing(10)
     }
 
     fn language_toggle(&'_ self) -> Row<'_, AppMessage> {
-        let label = match self.current_language {
-            Language::French => "FR",
-            Language::English => "EN",
+        let label = match self.current_language.code() {
+            "fr" => "FR",
+            _ => "EN",
         };
 
-        let button = button(text(label)).on_press(AppMessage::ChangeLanguage(
-            Language::from_string(label).change_language(),
-        ));
-        row![Space::with_width(Length::Fill), button].width(Length::Fill)
+        let toggle_button = button(text(label))
+            .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()));
+
+        row![Space::with_width(Length::Fill), toggle_button].width(Length::Fill)
     }
 
     fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
         match message {
             AppMessage::ChangeLanguage(language) => self.change_language(language),
             AppMessage::LanguageChanged(language, translations) => {
-                self.language_changed(language, translations)
+                self.current_language = language;
+                self.translations = translations;
+                Task::none()
             }
-            AppMessage::GoToWrite => self.go_to_write(),
-            AppMessage::Read(msg) => self.read(msg),
-            AppMessage::GoToRead => self.go_to_read(),
-            AppMessage::Write(msg) => self.write(msg),
+            AppMessage::GoToRead => {
+                if matches!(self.current_page, Page::Write(_)) {
+                    let (read_page, task) = ReadPage::new(self.query_use_case.clone());
+                    self.current_page = Page::Read(read_page);
+                    task.map(AppMessage::Read)
+                } else {
+                    Task::none()
+                }
+            }
+            AppMessage::GoToWrite => {
+                if matches!(self.current_page, Page::Read(_)) {
+                    let (write_page, task) = WritePage::new(
+                        self.indexing_use_case.clone(),
+                        self.directory_picker.clone(),
+                    );
+                    self.current_page = Page::Write(write_page);
+                    task.map(AppMessage::Write)
+                } else {
+                    Task::none()
+                }
+            }
+            AppMessage::Read(msg) => {
+                if let Page::Read(page) = &mut self.current_page {
+                    page.update(msg).map(AppMessage::Read)
+                } else {
+                    Task::none()
+                }
+            }
+            AppMessage::Write(msg) => {
+                if let Page::Write(page) = &mut self.current_page {
+                    page.update(msg).map(AppMessage::Write)
+                } else {
+                    Task::none()
+                }
+            }
         }
     }
 
     fn change_language(&mut self, language: Language) -> Task<AppMessage> {
-        let service = self.service.clone();
+        let language_use_case = self.language_use_case.clone();
         Task::perform(
             async move {
-                service.set_language(language.clone()).unwrap();
-                let translations = service.load_translations().unwrap();
+                language_use_case.set_language(language.clone()).ok();
+                let translations = language_use_case
+                    .load_translations(&language)
+                    .unwrap_or_default();
                 (language, translations)
             },
             |(language, translations)| AppMessage::LanguageChanged(language, translations),
         )
     }
-
-    fn language_changed(
-        &mut self,
-        language: Language,
-        translations: HashMap<String, String>,
-    ) -> Task<AppMessage> {
-        self.translations = translations;
-        self.current_language = language;
-        Task::none()
-    }
-
-    fn go_to_write(&mut self) -> Task<AppMessage> {
-        if let Page::Read(_) = &mut self.current_page {
-            self.init_write_page()
-        } else {
-            Task::none()
-        }
-    }
-
-    fn read(&mut self, msg: ReadMessage) -> Task<AppMessage> {
-        if let Page::Read(page) = &mut self.current_page {
-            page.update(msg).map(AppMessage::Read)
-        } else {
-            Task::none()
-        }
-    }
-
-    fn go_to_read(&mut self) -> Task<AppMessage> {
-        if let Page::Write(_) = &mut self.current_page {
-            self.init_read_page()
-        } else {
-            Task::none()
-        }
-    }
-
-    fn write(&mut self, msg: WriteMessage) -> Task<AppMessage> {
-        if let Page::Write(page) = &mut self.current_page {
-            page.update(msg).map(AppMessage::Write)
-        } else {
-            Task::none()
-        }
-    }
-
-    fn init_write_page(&mut self) -> Task<AppMessage> {
-        let (write_page, task) = WritePage::new(self.service.clone());
-        self.current_page = Page::Write(write_page);
-        task.map(AppMessage::Write)
-    }
-
-    fn init_read_page(&mut self) -> Task<AppMessage> {
-        let (page, task) = ReadPage::new(self.service.clone());
-        self.current_page = Page::Read(page);
-        task.map(AppMessage::Read)
-    }
 }
 
 // ============================================================================
-// APPLICATION SETUP AND MAIN
+// APPLICATION ENTRY POINT
 // ============================================================================
 
 fn window() -> Settings {
@@ -1445,7 +1598,7 @@ fn lister_icon() -> Icon {
 
 fn main() -> iced::Result {
     iced::application(
-        |lister_app: &ListerApp| lister_app.title(),
+        |app: &ListerApp| app.title(),
         ListerApp::update,
         ListerApp::view,
     )
