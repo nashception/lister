@@ -9,10 +9,11 @@ use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, Sql
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
 use iced::widget::scrollable::RelativeOffset;
-use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
+use iced::widget::{button, column, row, scrollable, text, text_input, Row, Rule, Space};
 use iced::window::{icon, Icon, Settings};
 use iced::{Alignment, Element, Length, Task};
 use rfd::AsyncFileDialog;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
@@ -28,49 +29,50 @@ const CACHED_SIZE: i64 = 10000;
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 
-#[test]
-fn insert_rows() {
-    let pool = get_connection_pool("app.db");
-    let backing: Vec<String> = (0..14000000)
-        .map(|i| format!("Dummy series/Episode {}", i))
-        .collect();
-
-    let repository = ListerRepository::new(pool);
-
-    repository
-        .add_category(NewFileCategory {
-            name: "Series".to_string(),
-        })
-        .expect("add_category failed");
-    repository
-        .add_drive(NewDriveEntry {
-            category_id: 1,
-            name: "Windows Drive".to_string(),
-        })
-        .expect("add_drive failed");
-
-    let files: Vec<NewFileEntry> = backing
-        .iter()
-        .enumerate()
-        .map(|(i, s)| NewFileEntry {
-            drive_id: 1,
-            path: String::from(s),
-            weight: 200_000 + (i as i64) * 42,
-        })
-        .collect();
-    repository.add_files(files).expect("add_files failed");
-}
-
 static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .build()
         .expect("failed to build Tokio runtime")
 });
 
+fn load_translations(lang: Language) -> HashMap<String, String> {
+    let lang = lang.to_string();
+    let path = format!("translations/{}.json", lang);
+    let file = fs::read_to_string(path)
+        .unwrap_or_else(|_| panic!("Missing translation file for language: {}", lang));
+    serde_json::from_str(&file).expect("Invalid translation JSON")
+}
+
+macro_rules! tr {
+    ($translations:expr, $key:expr) => {
+        tr_impl($translations, $key, &[])
+    };
+    ($translations:expr, $key:expr, $( $k:expr => $v:expr ),* ) => {
+        tr_impl($translations, $key, &[ $( ($k, $v) ),* ])
+    };
+}
+
+fn tr_impl(translations: &HashMap<String, String>, key: &str, params: &[(&str, &str)]) -> String {
+    let mut text = translations
+        .get(key)
+        .cloned()
+        .unwrap_or_else(|| key.to_string());
+
+    for (k, v) in params {
+        text = text.replace(&format!("{{{}}}", k), v);
+    }
+
+    text
+}
+
 fn main() -> iced::Result {
-    iced::application("Lister", ListerApp::update, ListerApp::view)
-        .window(window())
-        .run_with(|| ListerApp::new())
+    iced::application(
+        |lister_app: &ListerApp| lister_app.title(),
+        ListerApp::update,
+        ListerApp::view,
+    )
+    .window(window())
+    .run_with(|| ListerApp::new())
 }
 
 fn window() -> Settings {
@@ -91,6 +93,21 @@ enum AppMessage {
     GoToWrite,
     Read(ReadMessage),
     Write(WriteMessage),
+    ChangeLanguage,
+}
+
+enum Language {
+    English,
+    French,
+}
+
+impl Language {
+    fn to_string(&self) -> &str {
+        match self {
+            Language::English => "en",
+            Language::French => "fr",
+        }
+    }
 }
 
 enum Page {
@@ -179,6 +196,10 @@ impl ReadPage {
         (page, task)
     }
 
+    fn title(&self, translations: &HashMap<String, String>) -> String {
+        tr!(translations, "read_page_title")
+    }
+
     fn load_current_page(&mut self) -> Task<ReadMessage> {
         if let (Some(cached), Some(query)) = (&self.cached_results, &self.cached_query) {
             if *query == self.search_query {
@@ -230,10 +251,10 @@ impl ReadPage {
         )
     }
 
-    fn view(&'_ self) -> Element<'_, ReadMessage> {
-        let search_section = self.search_section();
+    fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
+        let search_section = self.search_section(translations);
         let files = self.files();
-        let pagination_section = self.create_pagination_section();
+        let pagination_section = self.create_pagination_section(translations);
 
         column![search_section, files, pagination_section]
             .spacing(20)
@@ -241,19 +262,22 @@ impl ReadPage {
             .into()
     }
 
-    fn search_section(&'_ self) -> Element<'_, ReadMessage> {
-        let search_input = text_input("Search files across all drives...", &self.search_query)
+    fn search_section(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, ReadMessage> {
+        let search_input = text_input(&tr!(translations, "search_placeholder"), &self.search_query)
             .id(self.search_input_id.clone())
             .on_input(ReadMessage::ContentChanged)
             .on_submit(ReadMessage::SearchSubmit)
             .padding(10)
             .width(Length::Fill);
 
-        let search_button = button(text("Search"))
+        let search_button = button(text(tr!(translations, "search_button")))
             .on_press(ReadMessage::SearchSubmit)
             .padding(10);
 
-        let clear_button = button(text("Clear"))
+        let clear_button = button(text(tr!(translations, "clear_button")))
             .on_press(ReadMessage::SearchClear)
             .padding(10)
             .style(button::secondary);
@@ -288,10 +312,13 @@ impl ReadPage {
         .into()
     }
 
-    fn create_pagination_section(&self) -> Element<'_, ReadMessage> {
+    fn create_pagination_section(
+        &self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, ReadMessage> {
         let total_pages = self.total_pages();
 
-        let first_button = button("First")
+        let first_button = button(text(tr!(translations, "first_button")))
             .on_press_maybe(if self.current_page_index > 0 {
                 Some(ReadMessage::FirstPage)
             } else {
@@ -304,7 +331,7 @@ impl ReadPage {
                 button::text
             });
 
-        let prev_button = button("Prev")
+        let prev_button = button(text(tr!(translations, "prev_button")))
             .on_press_maybe(if self.current_page_index > 0 {
                 Some(ReadMessage::PrevPage)
             } else {
@@ -325,7 +352,7 @@ impl ReadPage {
         ))
         .size(14);
 
-        let next_button = button("Next")
+        let next_button = button(text(tr!(translations, "next_button")))
             .on_press_maybe(if self.current_page_index < total_pages.saturating_sub(1) {
                 Some(ReadMessage::NextPage)
             } else {
@@ -338,7 +365,7 @@ impl ReadPage {
                 button::text
             });
 
-        let last_button = button("Last")
+        let last_button = button(text(tr!(translations, "last_button")))
             .on_press_maybe(if self.current_page_index < total_pages.saturating_sub(1) {
                 Some(ReadMessage::LastPage)
             } else {
@@ -351,11 +378,14 @@ impl ReadPage {
                 button::text
             });
 
-        let page_input = text_input("Page #", &self.page_input_value)
-            .on_input(ReadMessage::PageInputChanged)
-            .on_submit(ReadMessage::PageInputSubmit)
-            .padding(8)
-            .width(Length::Fixed(100f32));
+        let page_input = text_input(
+            &tr!(translations, "page_placeholder"),
+            &self.page_input_value,
+        )
+        .on_input(ReadMessage::PageInputChanged)
+        .on_submit(ReadMessage::PageInputSubmit)
+        .padding(8)
+        .width(Length::Fixed(100f32));
 
         row![
             first_button,
@@ -495,10 +525,14 @@ impl WritePage {
         (page, text_input::focus(category_input_id))
     }
 
-    fn view(&'_ self) -> Element<'_, WriteMessage> {
-        let form_section = self.create_form_section();
-        let action_section = self.create_action_section();
-        let status_section = self.create_status_section();
+    fn title(&self, translations: &HashMap<String, String>) -> String {
+        tr!(translations, "write_page_title")
+    }
+
+    fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
+        let form_section = self.create_form_section(translations);
+        let action_section = self.create_action_section(translations);
+        let status_section = self.create_status_section(translations);
 
         column![form_section, action_section, status_section]
             .spacing(20)
@@ -506,50 +540,57 @@ impl WritePage {
             .into()
     }
 
-    fn create_form_section(&'_ self) -> Element<'_, WriteMessage> {
-        let category_input = text_input(
-            "Enter category name (e.g., Movies, Documents, Music)",
-            &self.category,
-        )
-        .on_input(WriteMessage::CategoryChanged)
-        .id(self.category_input_id.clone())
-        .on_submit(WriteMessage::CategorySubmit)
-        .padding(10)
-        .width(Length::Fill);
+    fn create_form_section(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, WriteMessage> {
+        let category_input = text_input(&tr!(translations, "category_placeholder"), &self.category)
+            .on_input(WriteMessage::CategoryChanged)
+            .id(self.category_input_id.clone())
+            .on_submit(WriteMessage::CategorySubmit)
+            .padding(10)
+            .width(Length::Fill);
 
-        let drive_input = text_input(
-            "Enter drive name (e.g., External HDD, C: Drive)",
-            &self.drive,
-        )
-        .on_input(WriteMessage::DriveChanged)
-        .id(self.drive_input_id.clone())
-        .on_submit(WriteMessage::DriveSubmit)
-        .padding(10)
-        .width(Length::Fill);
+        let drive_input = text_input(&tr!(translations, "drive_placeholder"), &self.drive)
+            .on_input(WriteMessage::DriveChanged)
+            .id(self.drive_input_id.clone())
+            .on_submit(WriteMessage::DriveSubmit)
+            .padding(10)
+            .width(Length::Fill);
 
-        let directory_section = self.create_directory_section();
+        let directory_section = self.create_directory_section(translations);
 
         column![
-            text("File Indexing Setup").size(24).style(text::primary),
+            text(tr!(translations, "file_indexing_setup"))
+                .size(24)
+                .style(text::primary),
             Rule::horizontal(1),
-            column![text("Category").size(16), category_input,].spacing(5),
-            column![text("Drive Name").size(16), drive_input,].spacing(5),
+            column![
+                text(tr!(translations, "category_label")).size(16),
+                category_input,
+            ]
+            .spacing(5),
+            column![text(tr!(translations, "drive_label")).size(16), drive_input,].spacing(5),
             directory_section,
         ]
         .spacing(15)
         .into()
     }
 
-    fn create_directory_section(&'_ self) -> Element<'_, WriteMessage> {
-        let directory_label = text("Directory").size(16);
+    fn create_directory_section(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, WriteMessage> {
+        let directory_label = text(tr!(translations, "directory_label")).size(16);
 
         let directory_display = if let Some(dir) = &self.directory {
-            text(format!("Selected: {}", dir.display())).style(text::success)
+            text(tr!(translations, "selected_directory", "dir" => &dir.display().to_string()))
+                .style(text::success)
         } else {
-            text("No directory selected").style(text::secondary)
+            text(tr!(translations, "no_directory_selected")).style(text::secondary)
         };
 
-        let browse_button = button(text("Browse Directory"))
+        let browse_button = button(text(tr!(translations, "browse_directory")))
             .on_press(WriteMessage::DirectoryPressed)
             .padding(10)
             .style(button::secondary);
@@ -564,14 +605,17 @@ impl WritePage {
         .into()
     }
 
-    fn create_action_section(&'_ self) -> Element<'_, WriteMessage> {
+    fn create_action_section(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, WriteMessage> {
         let can_submit = !self.category.is_empty()
             && !self.drive.is_empty()
             && self.directory.is_some()
             && !self.is_walking_directory
             && !self.is_inserting_in_database;
 
-        let submit_button = button(text("Start Indexing"))
+        let submit_button = button(text(tr!(translations, "start_indexing")))
             .on_press_maybe(if can_submit {
                 Some(WriteMessage::WriteSubmit)
             } else {
@@ -587,7 +631,7 @@ impl WritePage {
 
         let requirements_text =
             if !can_submit && !self.is_walking_directory && !self.is_inserting_in_database {
-                text("Please fill in all fields to start indexing")
+                text(tr!(translations, "fill_all_fields"))
                     .style(text::secondary)
                     .size(12)
             } else {
@@ -599,36 +643,41 @@ impl WritePage {
             .into()
     }
 
-    fn create_status_section(&'_ self) -> Element<'_, WriteMessage> {
+    fn create_status_section(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, WriteMessage> {
         if !self.is_walking_directory && !self.is_inserting_in_database && !self.is_finished {
             return column![].into();
         }
 
         let status_content = if self.is_walking_directory {
             column![
-                text("[SCAN] Scanning Directory")
+                text(tr!(translations, "scan_status"))
                     .size(18)
                     .style(text::primary),
-                text("Finding files to index... This may take a while for large directories.")
+                text(tr!(translations, "scan_details"))
                     .style(text::secondary)
                     .size(14),
             ]
         } else if self.is_inserting_in_database {
             column![
-                text("[SAVE] Inserting Data").size(18).style(text::primary),
-                text("Adding files to database... Please wait.")
+                text(tr!(translations, "save_status"))
+                    .size(18)
+                    .style(text::primary),
+                text(tr!(translations, "save_details"))
                     .style(text::secondary)
                     .size(14),
             ]
         } else if self.is_finished {
             column![
-                text("[DONE] Indexing Complete")
+                text(tr!(translations, "done_status"))
                     .size(18)
                     .style(text::success),
-                text("Files have been successfully indexed and added to the database.")
+                text(tr!(translations, "done_details"))
                     .style(text::success)
                     .size(14),
-                button(text("Start New Indexing"))
+                button(text(tr!(translations, "start_new_indexing")))
                     .on_press(WriteMessage::ResetForm)
                     .padding(10)
                     .style(button::secondary),
@@ -777,7 +826,7 @@ fn file_path(chosen_directory_path: &PathBuf, absolute_file_path: &Path) -> Stri
         .into_owned()
 }
 
-pub fn weight(path: &Path) -> i64 {
+fn weight(path: &Path) -> i64 {
     fs::metadata(path)
         .expect("Cannot access file metadata")
         .len() as i64
@@ -785,6 +834,8 @@ pub fn weight(path: &Path) -> i64 {
 
 struct ListerApp {
     service: Arc<ListerService>,
+    french_enabled: bool,
+    translations: HashMap<String, String>,
     current_page: Page,
 }
 
@@ -800,22 +851,45 @@ impl ListerApp {
         (
             Self {
                 service,
+                french_enabled: true,
+                translations: load_translations(Language::French),
                 current_page: Page::Read(page),
             },
             task.map(AppMessage::Read),
         )
     }
 
+    fn title(&self) -> String {
+        match &self.current_page {
+            Page::Read(read_page) => read_page.title(&self.translations),
+            Page::Write(write_page) => write_page.title(&self.translations),
+        }
+    }
+
     fn view(&'_ self) -> Element<'_, AppMessage> {
+        let language_toggle = self.language_toggle();
+        let nav_bar = self.nav_bar();
+
+        let content = match &self.current_page {
+            Page::Read(page) => page.view(&self.translations).map(AppMessage::Read),
+            Page::Write(page) => page.view(&self.translations).map(AppMessage::Write),
+        };
+
+        column![language_toggle, Space::with_height(10), nav_bar, content]
+            .padding(20)
+            .into()
+    }
+
+    fn nav_bar(&'_ self) -> Row<'_, AppMessage> {
         let nav_bar = row![
-            button(text("Read").align_x(Alignment::Center))
+            button(text(tr!(&self.translations, "read_page")).align_x(Alignment::Center))
                 .on_press(AppMessage::GoToRead)
                 .style(match &self.current_page {
                     Page::Read(_) => button::primary,
                     Page::Write(_) => button::secondary,
                 })
                 .width(Length::Fill),
-            button(text("Write").align_x(Alignment::Center))
+            button(text(tr!(&self.translations, "write_page")).align_x(Alignment::Center))
                 .on_press(AppMessage::GoToWrite)
                 .style(match &self.current_page {
                     Page::Read(_) => button::secondary,
@@ -824,16 +898,29 @@ impl ListerApp {
                 .width(Length::Fill)
         ]
         .spacing(10);
+        nav_bar
+    }
 
-        let content = match &self.current_page {
-            Page::Read(page) => page.view().map(AppMessage::Read),
-            Page::Write(page) => page.view().map(AppMessage::Write),
-        };
+    fn language_toggle(&'_ self) -> Row<'_, AppMessage> {
+        let label = if self.french_enabled { "FR" } else { "EN" };
 
-        column![nav_bar, content].padding(20).into()
+        let button = button(text(label)).on_press(AppMessage::ChangeLanguage);
+        row![Space::with_width(Length::Fill), button].width(Length::Fill)
     }
 
     fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
+        match message {
+            AppMessage::ChangeLanguage => {
+                self.french_enabled = !self.french_enabled;
+                let lang = if self.french_enabled {
+                    Language::French
+                } else {
+                    Language::English
+                };
+                self.set_language(lang);
+            }
+            _ => (),
+        }
         match &mut self.current_page {
             Page::Read(page) => match message {
                 AppMessage::GoToWrite => self.init_write_page(),
@@ -858,6 +945,10 @@ impl ListerApp {
         let (page, task) = ReadPage::new(self.service.clone());
         self.current_page = Page::Read(page);
         task.map(AppMessage::Read)
+    }
+
+    fn set_language(&mut self, language: Language) {
+        self.translations = load_translations(language);
     }
 }
 

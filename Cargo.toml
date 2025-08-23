@@ -10,6 +10,7 @@ diesel_migrations = "*"
 humansize = "*"
 iced = { version = "*", features = ["image"] }
 rfd = "*"
+serde_json = "*"
 thiserror = "*"
 tokio = { version = "*", features = ["rt-multi-thread"] }
 walkdir = "*"
