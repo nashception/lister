@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 extern crate libsqlite3_sys;
 
 use crate::schema::{drive_entries, file_categories, file_entries};
