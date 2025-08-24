@@ -12,10 +12,11 @@ use diesel::result::Error as DieselError;
 use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
+use iced::keyboard::key::Named;
 use iced::widget::scrollable::RelativeOffset;
 use iced::widget::{button, column, row, scrollable, text, text_input, Row, Rule, Space};
 use iced::window::{icon, Icon, Settings};
-use iced::{Alignment, Element, Length, Task};
+use iced::{keyboard, widget, Alignment, Element, Length, Subscription, Task};
 use rfd::AsyncFileDialog;
 use std::collections::HashMap;
 use std::fs;
@@ -787,6 +788,7 @@ enum AppMessage {
     GoToWrite,
     Read(ReadMessage),
     Write(WriteMessage),
+    TabPressed { shift: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -806,9 +808,7 @@ enum ReadMessage {
 #[derive(Clone, Debug)]
 enum WriteMessage {
     CategoryChanged(String),
-    CategorySubmit,
     DriveChanged(String),
-    DriveSubmit,
     DirectoryPressed,
     DirectoryChanged(Option<PathBuf>),
     WriteSubmit,
@@ -1176,7 +1176,6 @@ struct WritePage {
     is_finished: bool,
     files_indexed: usize,
     category_input_id: text_input::Id,
-    drive_input_id: text_input::Id,
 }
 
 impl WritePage {
@@ -1195,7 +1194,6 @@ impl WritePage {
             is_finished: false,
             files_indexed: 0,
             category_input_id: category_input_id.clone(),
-            drive_input_id: text_input::Id::unique(),
         };
         (page, text_input::focus(category_input_id))
     }
@@ -1219,14 +1217,11 @@ impl WritePage {
         let category_input = text_input(&tr!(translations, "category_placeholder"), &self.category)
             .on_input(WriteMessage::CategoryChanged)
             .id(self.category_input_id.clone())
-            .on_submit(WriteMessage::CategorySubmit)
             .padding(10)
             .width(Length::Fill);
 
         let drive_input = text_input(&tr!(translations, "drive_placeholder"), &self.drive)
             .on_input(WriteMessage::DriveChanged)
-            .id(self.drive_input_id.clone())
-            .on_submit(WriteMessage::DriveSubmit)
             .padding(10)
             .width(Length::Fill);
 
@@ -1361,12 +1356,10 @@ impl WritePage {
                 self.category = value;
                 Task::none()
             }
-            WriteMessage::CategorySubmit => text_input::focus(self.drive_input_id.clone()),
             WriteMessage::DriveChanged(value) => {
                 self.drive = value;
                 Task::none()
             }
-            WriteMessage::DriveSubmit => text_input::focus(self.category_input_id.clone()),
             WriteMessage::DirectoryPressed => {
                 let picker = self.directory_picker.clone();
                 Task::perform(
@@ -1562,6 +1555,13 @@ impl ListerApp {
                     Task::none()
                 }
             }
+            AppMessage::TabPressed { shift } => {
+                if shift {
+                    widget::focus_previous()
+                } else {
+                    widget::focus_next()
+                }
+            }
         }
     }
 
@@ -1577,6 +1577,20 @@ impl ListerApp {
             },
             |(language, translations)| AppMessage::LanguageChanged(language, translations),
         )
+    }
+
+    fn subscription(&self) -> Subscription<AppMessage> {
+        keyboard::on_key_press(|key, modifiers| {
+            let keyboard::Key::Named(key) = key else {
+                return None;
+            };
+            match (key, modifiers) {
+                (Named::Tab, _) => Some(AppMessage::TabPressed {
+                    shift: modifiers.shift(),
+                }),
+                _ => None,
+            }
+        })
     }
 }
 
@@ -1597,11 +1611,8 @@ fn lister_icon() -> Icon {
 }
 
 fn main() -> iced::Result {
-    iced::application(
-        |app: &ListerApp| app.title(),
-        ListerApp::update,
-        ListerApp::view,
-    )
-    .window(window())
-    .run_with(|| ListerApp::new())
+    iced::application(ListerApp::title, ListerApp::update, ListerApp::view)
+        .subscription(ListerApp::subscription)
+        .window(window())
+        .run_with(ListerApp::new)
 }
