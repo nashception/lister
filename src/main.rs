@@ -18,12 +18,15 @@ use iced::widget::scrollable::RelativeOffset;
 use iced::widget::{button, column, row, scrollable, text, text_input, Row, Rule, Space};
 use iced::window::{icon, Icon, Settings};
 use iced::{keyboard, widget, Alignment, Element, Length, Subscription, Task};
-use rfd::AsyncFileDialog;
+use rfd::{AsyncFileDialog, MessageButtons, MessageDialog, MessageLevel};
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf, StripPrefixError};
+use std::process::exit;
 use std::sync::{Arc, LazyLock};
 use tokio::runtime::Runtime;
+use tokio::task::JoinError;
 use walkdir::WalkDir;
 
 mod schema;
@@ -41,7 +44,7 @@ type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .build()
-        .expect("failed to build Tokio runtime")
+        .unwrap_or_else(|err| popup_error_and_exit(err))
 });
 
 // ============================================================================
@@ -129,8 +132,8 @@ pub struct Drive {
 }
 
 #[derive(Clone, Debug)]
-pub struct PaginatedResult<T> {
-    pub items: Vec<T>,
+pub struct PaginatedResult {
+    pub items: Vec<FileWithMetadata>,
     pub total_count: i64,
 }
 
@@ -144,8 +147,9 @@ impl DirectoryScanner {
         Self { directory }
     }
 
-    pub async fn scan_directory(&self) -> Vec<FileEntry> {
+    pub async fn scan_directory(&self) -> Result<Vec<FileEntry>, DirectoryScannerError> {
         let directory = self.directory.clone();
+
         TOKIO_RUNTIME
             .handle()
             .spawn_blocking(move || {
@@ -157,30 +161,32 @@ impl DirectoryScanner {
                     .map(|e| Self::extract_file_info(&directory, e.path()))
                     .collect()
             })
-            .await
-            .unwrap()
+            .await?
     }
 
-    fn extract_file_info(base_directory: &PathBuf, file_path: &Path) -> FileEntry {
-        FileEntry {
-            path: Self::relative_path(base_directory, file_path),
-            size_bytes: Self::file_size(file_path),
-        }
+    fn extract_file_info(
+        base_directory: &PathBuf,
+        file_path: &Path,
+    ) -> Result<FileEntry, DirectoryScannerError> {
+        Ok(FileEntry {
+            path: Self::relative_path(base_directory, file_path)?,
+            size_bytes: Self::file_size(file_path)?,
+        })
     }
 
-    fn relative_path(base_directory: &PathBuf, file_path: &Path) -> String {
-        file_path
+    fn relative_path(
+        base_directory: &Path,
+        file_path: &Path,
+    ) -> Result<String, DirectoryScannerError> {
+        let relative_path = file_path
             .strip_prefix(base_directory)
-            .expect("File not under chosen directory")
-            .to_path_buf()
-            .to_string_lossy()
-            .into_owned()
+            .map(|p| p.to_string_lossy().into_owned())?;
+        Ok(relative_path)
     }
 
-    fn file_size(path: &Path) -> i64 {
-        fs::metadata(path)
-            .expect("Cannot access file metadata")
-            .len() as i64
+    fn file_size(path: &Path) -> Result<i64, DirectoryScannerError> {
+        let file_size = fs::metadata(path).map(|m| m.len() as i64)?;
+        Ok(file_size)
     }
 }
 
@@ -197,13 +203,13 @@ pub trait FileQueryUseCase: Send + Sync {
         query: &str,
         page: usize,
         page_size: usize,
-    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError>;
+    ) -> Result<PaginatedResult, DomainError>;
 
     async fn list_files(
         &self,
         page: usize,
         page_size: usize,
-    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError>;
+    ) -> Result<PaginatedResult, DomainError>;
 
     async fn count_search_results(&self, query: &str) -> Result<i64, DomainError>;
 }
@@ -238,14 +244,14 @@ pub trait FileQueryRepository: Send + Sync {
         &self,
         offset: i64,
         limit: i64,
-    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError>;
+    ) -> Result<PaginatedResult, RepositoryError>;
 
     async fn search_files_paginated(
         &self,
         query: &str,
         offset: i64,
         limit: i64,
-    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError>;
+    ) -> Result<PaginatedResult, RepositoryError>;
 
     async fn count_search_results(&self, query: &str) -> Result<i64, RepositoryError>;
 }
@@ -300,7 +306,7 @@ impl FileQueryUseCase for FileQueryService {
         query: &str,
         page: usize,
         page_size: usize,
-    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError> {
+    ) -> Result<PaginatedResult, DomainError> {
         let offset = (page * page_size) as i64;
         let limit = page_size as i64;
 
@@ -333,7 +339,7 @@ impl FileQueryUseCase for FileQueryService {
         &self,
         page: usize,
         page_size: usize,
-    ) -> Result<PaginatedResult<FileWithMetadata>, DomainError> {
+    ) -> Result<PaginatedResult, DomainError> {
         let offset = (page * page_size) as i64;
         let limit = page_size as i64;
         self.query_repo
@@ -372,7 +378,7 @@ impl FileIndexingUseCase for FileIndexingService {
 
     async fn scan_directory(&self, directory: PathBuf) -> Result<Vec<FileEntry>, DomainError> {
         let scanner = DirectoryScanner::new(directory);
-        let files = scanner.scan_directory().await;
+        let files = scanner.scan_directory().await?;
         Ok(files)
     }
 
@@ -436,6 +442,8 @@ impl LanguageManagementUseCase for LanguageService {
 pub enum DomainError {
     #[error("Repository error: {0}")]
     Repository(#[from] RepositoryError),
+    #[error("Directory scan failed: {0}")]
+    DirectoryScannerError(#[from] DirectoryScannerError),
     #[error("Invalid input: {message}")]
     InvalidInput { message: String },
     #[error("Operation failed: {message}")]
@@ -448,8 +456,20 @@ pub enum RepositoryError {
     Database(#[from] DieselError),
     #[error("Connection pool error: {0}")]
     ConnectionPool(#[from] PoolError),
-    #[error("Not found")]
-    NotFound,
+    #[error("Migration error: {0}")]
+    Migration(String),
+    #[error("Tokio error: {0}")]
+    Tokio(#[from] JoinError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DirectoryScannerError {
+    #[error("Tokio error: {0}")]
+    Tokio(#[from] JoinError),
+    #[error("Relative path error: {0}")]
+    RelativePath(#[from] StripPrefixError),
+    #[error("File size error: {0}")]
+    FileSize(#[from] std::io::Error),
 }
 
 // ============================================================================
@@ -518,31 +538,33 @@ pub struct SqliteFileRepository {
 }
 
 impl SqliteFileRepository {
-    pub fn new(database_url: &str) -> Self {
-        let pool = Self::create_pool(database_url);
-        Self::enable_foreign_keys(&pool);
-        Self::run_migrations(&pool);
-        Self { pool }
+    pub fn new(database_url: &str) -> Result<Self, RepositoryError> {
+        let pool = Self::create_pool(database_url)?;
+        Self::enable_foreign_keys(&pool)?;
+        Self::run_migrations(&pool)?;
+        Ok(Self { pool })
     }
 
-    fn create_pool(database_url: &str) -> DieselPool {
+    fn create_pool(database_url: &str) -> Result<DieselPool, RepositoryError> {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
         Pool::builder()
             .build(manager)
-            .expect("Failed to create SQLite pool")
+            .map_err(RepositoryError::ConnectionPool)
     }
 
-    fn enable_foreign_keys(pool: &DieselPool) {
-        let conn = &mut pool.get().expect("Failed to get connection");
+    fn enable_foreign_keys(pool: &DieselPool) -> Result<(), RepositoryError> {
+        let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
         diesel::sql_query("PRAGMA foreign_keys = ON")
-            .execute(conn)
-            .expect("Failed to enable foreign keys");
+            .execute(&mut conn)
+            .map_err(RepositoryError::Database)?;
+        Ok(())
     }
 
-    fn run_migrations(pool: &DieselPool) {
-        let mut conn = pool.get().expect("Failed to get connection");
+    fn run_migrations(pool: &DieselPool) -> Result<(), RepositoryError> {
+        let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
         conn.run_pending_migrations(MIGRATIONS)
-            .expect("Migration failed");
+            .map_err(|err| RepositoryError::Migration(err.to_string()))?;
+        Ok(())
     }
 
     fn save_category(
@@ -620,7 +642,7 @@ impl FileQueryRepository for SqliteFileRepository {
         &self,
         offset: i64,
         limit: i64,
-    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError> {
+    ) -> Result<PaginatedResult, RepositoryError> {
         let pool = self.pool.clone();
         TOKIO_RUNTIME
             .handle()
@@ -653,8 +675,7 @@ impl FileQueryRepository for SqliteFileRepository {
 
                 Ok(PaginatedResult { items, total_count })
             })
-            .await
-            .unwrap()
+            .await?
     }
 
     async fn search_files_paginated(
@@ -662,7 +683,7 @@ impl FileQueryRepository for SqliteFileRepository {
         query: &str,
         offset: i64,
         limit: i64,
-    ) -> Result<PaginatedResult<FileWithMetadata>, RepositoryError> {
+    ) -> Result<PaginatedResult, RepositoryError> {
         let pool = self.pool.clone();
         let search_pattern = format!("%{}%", query.replace(" ", "_"));
         TOKIO_RUNTIME
@@ -700,8 +721,7 @@ impl FileQueryRepository for SqliteFileRepository {
 
                 Ok(PaginatedResult { items, total_count })
             })
-            .await
-            .unwrap()
+            .await?
     }
 
     async fn count_search_results(&self, query: &str) -> Result<i64, RepositoryError> {
@@ -717,8 +737,7 @@ impl FileQueryRepository for SqliteFileRepository {
                     .get_result(&mut conn)?;
                 Ok(count)
             })
-            .await
-            .unwrap()
+            .await?
     }
 }
 
@@ -739,8 +758,7 @@ impl FileCommandRepository for SqliteFileRepository {
                     Self::remove_duplicates(category.name, drive.name, conn)
                 })
             })
-            .await
-            .unwrap()
+            .await?
     }
 
     async fn save(
@@ -765,8 +783,7 @@ impl FileCommandRepository for SqliteFileRepository {
                     Self::save_files(files, drive_id, conn)
                 })
             })
-            .await
-            .unwrap()
+            .await?
     }
 }
 
@@ -851,7 +868,7 @@ enum ReadMessage {
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
-    FilesLoaded((u64, PaginatedResult<FileWithMetadata>)),
+    FilesLoaded((u64, PaginatedResult)),
 }
 
 #[derive(Clone, Debug)]
@@ -960,12 +977,17 @@ impl ReadPage {
                     query_use_case
                         .search_files(&search_query, page, ITEMS_PER_PAGE)
                         .await
-                };
+                }
+                .unwrap_or_else(|error| {
+                    popup_error(error);
+                    PaginatedResult {
+                        items: vec![],
+                        total_count: 0,
+                    }
+                });
                 (task_id, result)
             },
-            |(finished_task_id, result)| {
-                ReadMessage::FilesLoaded((finished_task_id, result.unwrap()))
-            },
+            |(finished_task_id, result)| ReadMessage::FilesLoaded((finished_task_id, result)),
         )
     }
 
@@ -1181,11 +1203,7 @@ impl ReadPage {
         self.load_current_page()
     }
 
-    fn handle_files_loaded(
-        &mut self,
-        task_id: u64,
-        result: PaginatedResult<FileWithMetadata>,
-    ) -> Task<ReadMessage> {
+    fn handle_files_loaded(&mut self, task_id: u64, result: PaginatedResult) -> Task<ReadMessage> {
         if task_id != self.active_task_id {
             return Task::none();
         }
@@ -1194,10 +1212,7 @@ impl ReadPage {
             .chain(text_input::focus(self.search_input_id.clone()))
     }
 
-    fn process_loaded_files(
-        &mut self,
-        result: PaginatedResult<FileWithMetadata>,
-    ) -> Task<ReadMessage> {
+    fn process_loaded_files(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
         if result.total_count <= CACHED_SIZE && !self.search_query.is_empty() {
             self.cached_results = Some(result.items.clone());
             self.cached_query = Some(self.search_query.clone());
@@ -1481,7 +1496,7 @@ impl WritePage {
                 indexing_use_case
                     .remove_duplicates(category, drive)
                     .await
-                    .unwrap();
+                    .unwrap_or_else(|error| popup_error_and_exit(error));
             },
             |_| WriteMessage::DatabaseCleaned,
         )
@@ -1494,17 +1509,22 @@ impl WritePage {
         self.state = IndexingState::Scanning;
 
         let indexing_use_case = self.indexing_use_case.clone();
-        let directory = self.directory.clone().unwrap();
-
-        Task::perform(
-            async move {
-                indexing_use_case
-                    .scan_directory(directory)
-                    .await
-                    .unwrap_or(Vec::new())
-            },
-            WriteMessage::ScanDirectoryFinished,
-        )
+        if let Some(directory) = self.directory.clone() {
+            Task::perform(
+                async move {
+                    indexing_use_case
+                        .scan_directory(directory)
+                        .await
+                        .unwrap_or_else(|error| {
+                            popup_error(error);
+                            Vec::new()
+                        })
+                },
+                WriteMessage::ScanDirectoryFinished,
+            )
+        } else {
+            Task::none()
+        }
     }
 
     fn insert_in_database(&mut self, files: Vec<FileEntry>) -> Task<WriteMessage> {
@@ -1543,7 +1563,9 @@ struct ListerApp {
 impl ListerApp {
     fn new() -> (Self, Task<AppMessage>) {
         // Create the single repository instance
-        let repository = Arc::new(SqliteFileRepository::new("app.db"));
+        let repository = Arc::new(
+            SqliteFileRepository::new("app.db").unwrap_or_else(|error| popup_error_and_exit(error)),
+        );
         let translation_loader = Arc::new(JsonTranslationLoader);
         let directory_picker = Arc::new(NativeDirectoryPicker);
 
@@ -1710,20 +1732,35 @@ impl ListerApp {
     }
 }
 
+fn popup_error(error: impl Display) {
+    MessageDialog::new()
+        .set_level(MessageLevel::Error)
+        .set_title("An error happened")
+        .set_description(error.to_string())
+        .set_buttons(MessageButtons::Ok)
+        .show();
+}
+
+fn popup_error_and_exit(error: impl Display) -> ! {
+    popup_error(error);
+    exit(1)
+}
+
 // ============================================================================
 // APPLICATION ENTRY POINT
 // ============================================================================
 
 fn window() -> Settings {
     Settings {
-        icon: Some(lister_icon()),
+        icon: lister_icon(),
         ..Default::default()
     }
 }
 
-fn lister_icon() -> Icon {
+fn lister_icon() -> Option<Icon> {
     icon::from_file_data(include_bytes!("../assets/icon.png"), None)
-        .expect("Icon file should exist and be ICO format")
+        .map_err(|error| popup_error(error))
+        .ok()
 }
 
 fn main() -> iced::Result {
