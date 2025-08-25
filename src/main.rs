@@ -6,6 +6,7 @@ extern crate libsqlite3_sys;
 // ============================================================================
 
 use crate::schema::{drive_entries, file_categories, file_entries, settings};
+use diesel::dsl::exists;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError};
 use diesel::result::Error as DieselError;
@@ -209,6 +210,7 @@ pub trait FileQueryUseCase: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait FileIndexingUseCase: Send + Sync {
+    async fn remove_duplicates(&self, category: String, drive: String) -> Result<(), DomainError>;
     async fn scan_directory(&self, directory: PathBuf) -> Result<Vec<FileEntry>, DomainError>;
     async fn insert_in_database(
         &self,
@@ -250,6 +252,11 @@ pub trait FileQueryRepository: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait FileCommandRepository: Send + Sync {
+    async fn remove_duplicates(
+        &self,
+        category: Category,
+        drive: Drive,
+    ) -> Result<(), RepositoryError>;
     async fn save(
         &self,
         category: Category,
@@ -355,6 +362,14 @@ impl FileIndexingService {
 
 #[async_trait::async_trait]
 impl FileIndexingUseCase for FileIndexingService {
+    async fn remove_duplicates(&self, category: String, drive: String) -> Result<(), DomainError> {
+        let files_count = self
+            .command_repo
+            .remove_duplicates(Category { name: category }, Drive { name: drive })
+            .await?;
+        Ok(files_count)
+    }
+
     async fn scan_directory(&self, directory: PathBuf) -> Result<Vec<FileEntry>, DomainError> {
         let scanner = DirectoryScanner::new(directory);
         let files = scanner.scan_directory().await;
@@ -578,6 +593,25 @@ impl SqliteFileRepository {
 
         Ok(insert_count)
     }
+
+    fn remove_duplicates(
+        category_name: String,
+        drive_name: String,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), RepositoryError> {
+        diesel::delete(
+            file_entries::table.filter(exists(
+                drive_entries::table
+                    .inner_join(file_categories::table)
+                    .filter(drive_entries::id.eq(file_entries::drive_id))
+                    .filter(file_categories::name.eq(category_name))
+                    .filter(drive_entries::name.eq(drive_name)),
+            )),
+        )
+        .execute(conn)?;
+
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -690,6 +724,25 @@ impl FileQueryRepository for SqliteFileRepository {
 
 #[async_trait::async_trait]
 impl FileCommandRepository for SqliteFileRepository {
+    async fn remove_duplicates(
+        &self,
+        category: Category,
+        drive: Drive,
+    ) -> Result<(), RepositoryError> {
+        let pool = self.pool.clone();
+
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+                conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
+                    Self::remove_duplicates(category.name, drive.name, conn)
+                })
+            })
+            .await
+            .unwrap()
+    }
+
     async fn save(
         &self,
         category: Category,
@@ -807,6 +860,7 @@ enum WriteMessage {
     DriveChanged(String),
     DirectoryPressed,
     DirectoryChanged(Option<PathBuf>),
+    DatabaseCleaned,
     WriteSubmit,
     ScanDirectoryFinished(Vec<FileEntry>),
     InsertInDatabaseFinished(usize),
@@ -1165,6 +1219,7 @@ impl ReadPage {
 #[derive(Clone, Debug, PartialEq)]
 enum IndexingState {
     Ready,
+    CleaningDatabase,
     Scanning,
     Saving,
     Completed { files_indexed: usize },
@@ -1312,6 +1367,16 @@ impl WritePage {
     ) -> Element<'_, WriteMessage> {
         match &self.state {
             IndexingState::Ready => column![].into(),
+            IndexingState::CleaningDatabase => column![
+                text(tr!(translations, "clean_status"))
+                    .size(18)
+                    .style(text::primary),
+                text(tr!(translations, "clean_details"))
+                    .style(text::secondary)
+                    .size(14),
+            ]
+            .spacing(10)
+            .into(),
             IndexingState::Scanning => column![
                 text(tr!(translations, "scan_status"))
                     .size(18)
@@ -1380,7 +1445,8 @@ impl WritePage {
                 self.directory = directory;
                 Task::none()
             }
-            WriteMessage::WriteSubmit => self.start_indexing(),
+            WriteMessage::WriteSubmit => self.clean_database(),
+            WriteMessage::DatabaseCleaned => self.start_indexing(),
             WriteMessage::ScanDirectoryFinished(scanned_files) => {
                 self.insert_in_database(scanned_files)
             }
@@ -1400,8 +1466,29 @@ impl WritePage {
         }
     }
 
-    fn start_indexing(&mut self) -> Task<WriteMessage> {
+    fn clean_database(&mut self) -> Task<WriteMessage> {
         if self.state != IndexingState::Ready {
+            return Task::none();
+        }
+        self.state = IndexingState::CleaningDatabase;
+
+        let indexing_use_case = self.indexing_use_case.clone();
+        let category = self.category.clone();
+        let drive = self.drive.clone();
+
+        Task::perform(
+            async move {
+                indexing_use_case
+                    .remove_duplicates(category, drive)
+                    .await
+                    .unwrap();
+            },
+            |_| WriteMessage::DatabaseCleaned,
+        )
+    }
+
+    fn start_indexing(&mut self) -> Task<WriteMessage> {
+        if self.state != IndexingState::CleaningDatabase {
             return Task::none();
         }
         self.state = IndexingState::Scanning;

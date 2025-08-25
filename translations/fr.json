@@ -23,6 +23,8 @@
   "browse_directory": "Parcourir le répertoire",
   "start_indexing": "Commencer l'indexation",
   "fill_all_fields": "Veuillez remplir tous les champs pour démarrer l'indexation",
+  "clean_status": "[CLEAN] Nettoyage de la base de donnée",
+  "clean_details": "Recherche des fichiers à supprimer...",
   "scan_status": "[SCAN] Analyse du répertoire",
   "scan_details": "Recherche des fichiers à indexer... Cela peut prendre du temps pour les grands répertoires.",
   "save_status": "[ENREG] Insertion des données",

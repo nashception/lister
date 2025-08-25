@@ -23,6 +23,8 @@
   "browse_directory": "Browse Directory",
   "start_indexing": "Start Indexing",
   "fill_all_fields": "Please fill in all fields to start indexing",
+  "clean_status": "[CLEAN] Cleaning database",
+  "clean_details": "Finding files to delete...",
   "scan_status": "[SCAN] Scanning Directory",
   "scan_details": "Finding files to index... This may take a while for large directories.",
   "save_status": "[SAVE] Inserting Data",
