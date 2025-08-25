@@ -255,10 +255,12 @@ pub trait FileQueryRepository: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait FileCommandRepository: Send + Sync {
-    async fn save_category(&self, category: Category) -> Result<i32, RepositoryError>;
-    async fn save_drive(&self, drive: Drive, category_id: i32) -> Result<i32, RepositoryError>;
-    async fn save_files(&self, drive_id: i32, files: Vec<FileEntry>)
-    -> Result<(), RepositoryError>;
+    async fn save(
+        &self,
+        category: Category,
+        drive: Drive,
+        files: Vec<FileEntry>,
+    ) -> Result<usize, RepositoryError>;
 }
 
 pub trait LanguageRepository: Send + Sync {
@@ -367,20 +369,14 @@ impl FileIndexingUseCase for FileIndexingService {
         // Scan directory
         let scanner = DirectoryScanner::new(category.clone(), drive.clone(), directory);
         let files = scanner.scan_directory().await;
-        let file_count = files.len();
 
         // Save to repository
-        let category_id = self
+        let files_count = self
             .command_repo
-            .save_category(Category { name: category })
+            .save(Category { name: category }, Drive { name: drive }, files)
             .await?;
-        let drive_id = self
-            .command_repo
-            .save_drive(Drive { name: drive }, category_id)
-            .await?;
-        self.command_repo.save_files(drive_id, files).await?;
 
-        Ok(file_count)
+        Ok(files_count)
     }
 }
 
@@ -538,6 +534,55 @@ impl SqliteFileRepository {
         conn.run_pending_migrations(MIGRATIONS)
             .expect("Migration failed");
     }
+
+    fn save_category(
+        category_name: String,
+        conn: &mut SqliteConnection,
+    ) -> Result<i32, RepositoryError> {
+        let category_id = diesel::insert_into(file_categories::table)
+            .values(NewFileCategoryDto {
+                name: category_name,
+            })
+            .returning(file_categories::id)
+            .get_result(conn)?;
+        Ok(category_id)
+    }
+
+    fn save_drive(
+        drive_name: String,
+        category_id: i32,
+        conn: &mut SqliteConnection,
+    ) -> Result<i32, RepositoryError> {
+        let drive_id = diesel::insert_into(drive_entries::table)
+            .values(NewDriveEntryDto {
+                category_id,
+                name: drive_name,
+            })
+            .returning(drive_entries::id)
+            .get_result(conn)?;
+        Ok(drive_id)
+    }
+
+    fn save_files(
+        files: Vec<FileEntry>,
+        drive_id: i32,
+        conn: &mut SqliteConnection,
+    ) -> Result<usize, RepositoryError> {
+        let dto_files: Vec<NewFileEntryDto> = files
+            .into_iter()
+            .map(|f| NewFileEntryDto {
+                drive_id,
+                path: f.path,
+                weight: f.size_bytes,
+            })
+            .collect();
+
+        let insert_count = diesel::insert_into(file_entries::table)
+            .values(&dto_files)
+            .execute(conn)?;
+
+        Ok(insert_count)
+    }
 }
 
 #[async_trait::async_trait]
@@ -650,71 +695,27 @@ impl FileQueryRepository for SqliteFileRepository {
 
 #[async_trait::async_trait]
 impl FileCommandRepository for SqliteFileRepository {
-    async fn save_category(&self, category: Category) -> Result<i32, RepositoryError> {
+    async fn save(
+        &self,
+        category: Category,
+        drive: Drive,
+        files: Vec<FileEntry>,
+    ) -> Result<usize, RepositoryError> {
         let pool = self.pool.clone();
         let category_name = category.name;
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
-                let id = diesel::insert_into(file_categories::table)
-                    .values(NewFileCategoryDto {
-                        name: category_name,
-                    })
-                    .returning(file_categories::id)
-                    .get_result(&mut conn)?;
-                Ok(id)
-            })
-            .await
-            .unwrap()
-    }
-
-    async fn save_drive(&self, drive: Drive, category_id: i32) -> Result<i32, RepositoryError> {
-        let pool = self.pool.clone();
         let drive_name = drive.name;
+
         TOKIO_RUNTIME
             .handle()
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
-                let id = diesel::insert_into(drive_entries::table)
-                    .values(NewDriveEntryDto {
-                        category_id,
-                        name: drive_name,
-                    })
-                    .returning(drive_entries::id)
-                    .get_result(&mut conn)?;
-                Ok(id)
-            })
-            .await
-            .unwrap()
-    }
-
-    async fn save_files(
-        &self,
-        drive_id: i32,
-        files: Vec<FileEntry>,
-    ) -> Result<(), RepositoryError> {
-        let pool = self.pool.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
-                let dto_files: Vec<NewFileEntryDto> = files
-                    .into_iter()
-                    .map(|f| NewFileEntryDto {
-                        drive_id,
-                        path: f.path,
-                        weight: f.size_bytes,
-                    })
-                    .collect();
-
                 conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
-                    diesel::insert_into(file_entries::table)
-                        .values(&dto_files)
-                        .execute(conn)?;
-                    Ok(())
-                })?;
-                Ok(())
+                    let category_id = Self::save_category(category_name, conn)?;
+
+                    let drive_id = Self::save_drive(drive_name, category_id, conn)?;
+
+                    Self::save_files(files, drive_id, conn)
+                })
             })
             .await
             .unwrap()
