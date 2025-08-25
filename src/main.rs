@@ -135,18 +135,12 @@ pub struct PaginatedResult<T> {
 
 // Domain Services
 pub struct DirectoryScanner {
-    pub category: String,
-    pub drive: String,
     pub directory: PathBuf,
 }
 
 impl DirectoryScanner {
-    pub fn new(category: String, drive: String, directory: PathBuf) -> Self {
-        Self {
-            category,
-            drive,
-            directory,
-        }
+    pub fn new(directory: PathBuf) -> Self {
+        Self { directory }
     }
 
     pub async fn scan_directory(&self) -> Vec<FileEntry> {
@@ -215,11 +209,12 @@ pub trait FileQueryUseCase: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait FileIndexingUseCase: Send + Sync {
-    async fn index_directory(
+    async fn scan_directory(&self, directory: PathBuf) -> Result<Vec<FileEntry>, DomainError>;
+    async fn insert_in_database(
         &self,
         category: String,
         drive: String,
-        directory: PathBuf,
+        files: Vec<FileEntry>,
     ) -> Result<usize, DomainError>;
 }
 
@@ -360,22 +355,22 @@ impl FileIndexingService {
 
 #[async_trait::async_trait]
 impl FileIndexingUseCase for FileIndexingService {
-    async fn index_directory(
+    async fn scan_directory(&self, directory: PathBuf) -> Result<Vec<FileEntry>, DomainError> {
+        let scanner = DirectoryScanner::new(directory);
+        let files = scanner.scan_directory().await;
+        Ok(files)
+    }
+
+    async fn insert_in_database(
         &self,
         category: String,
         drive: String,
-        directory: PathBuf,
+        files: Vec<FileEntry>,
     ) -> Result<usize, DomainError> {
-        // Scan directory
-        let scanner = DirectoryScanner::new(category.clone(), drive.clone(), directory);
-        let files = scanner.scan_directory().await;
-
-        // Save to repository
         let files_count = self
             .command_repo
             .save(Category { name: category }, Drive { name: drive }, files)
             .await?;
-
         Ok(files_count)
     }
 }
@@ -813,7 +808,8 @@ enum WriteMessage {
     DirectoryPressed,
     DirectoryChanged(Option<PathBuf>),
     WriteSubmit,
-    IndexingFinished(usize),
+    ScanDirectoryFinished(Vec<FileEntry>),
+    InsertInDatabaseFinished(usize),
     ResetForm,
 }
 
@@ -1166,6 +1162,14 @@ impl ReadPage {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum IndexingState {
+    Ready,
+    Scanning,
+    Saving,
+    Completed { files_indexed: usize },
+}
+
 // Write Page (Directory Indexing)
 struct WritePage {
     indexing_use_case: Arc<dyn FileIndexingUseCase>,
@@ -1173,9 +1177,7 @@ struct WritePage {
     category: String,
     drive: String,
     directory: Option<PathBuf>,
-    is_indexing: bool,
-    is_finished: bool,
-    files_indexed: usize,
+    state: IndexingState,
     category_input_id: text_input::Id,
 }
 
@@ -1191,9 +1193,7 @@ impl WritePage {
             category: String::new(),
             drive: String::new(),
             directory: None,
-            is_indexing: false,
-            is_finished: false,
-            files_indexed: 0,
+            state: IndexingState::Ready,
             category_input_id: category_input_id.clone(),
         };
         (page, text_input::focus(category_input_id))
@@ -1277,7 +1277,7 @@ impl WritePage {
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
-        let can_submit = self.form_is_complete() && !self.is_indexing;
+        let can_submit = self.form_is_complete() && self.state == IndexingState::Ready;
 
         let submit_button = button(text(tr!(translations, "start_indexing")))
             .on_press_maybe(if can_submit {
@@ -1293,7 +1293,7 @@ impl WritePage {
                 button::text
             });
 
-        let requirements_text = if !can_submit && !self.is_indexing {
+        let requirements_text = if !self.form_is_complete() {
             text(tr!(translations, "fill_all_fields"))
                 .style(text::secondary)
                 .size(12)
@@ -1310,41 +1310,49 @@ impl WritePage {
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
-        if !self.is_indexing && !self.is_finished {
-            return column![].into();
-        }
-
-        let status_content = if self.is_indexing {
-            column![
-                text(tr!(translations, "indexing_status"))
+        match &self.state {
+            IndexingState::Ready => column![].into(),
+            IndexingState::Scanning => column![
+                text(tr!(translations, "scan_status"))
                     .size(18)
                     .style(text::primary),
-                text(tr!(translations, "indexing_details"))
+                text(tr!(translations, "scan_details"))
                     .style(text::secondary)
                     .size(14),
             ]
-        } else if self.is_finished {
-            column![
-                text(tr!(translations, "done_status"))
+            .spacing(10)
+            .into(),
+            IndexingState::Saving => column![
+                text(tr!(translations, "save_status"))
                     .size(18)
-                    .style(text::success),
-                text(
-                    tr!(translations, "done_details", "nb_files" => &self.files_indexed.to_string())
-                )
-                .style(text::success)
-                .size(14),
-                button(text(tr!(translations, "start_new_indexing")))
-                    .on_press(WriteMessage::ResetForm)
-                    .padding(10)
-                    .style(button::secondary),
+                    .style(text::primary),
+                text(tr!(translations, "save_details"))
+                    .style(text::secondary)
+                    .size(14),
             ]
-        } else {
-            column![]
-        };
-
-        column![Rule::horizontal(1), status_content.spacing(10),]
+            .spacing(10)
+            .into(),
+            IndexingState::Completed { files_indexed } => column![
+                Rule::horizontal(1),
+                column![
+                    text(tr!(translations, "done_status"))
+                        .size(18)
+                        .style(text::success),
+                    text(
+                        tr!(translations, "done_details", "nb_files" => &files_indexed.to_string())
+                    )
+                    .style(text::success)
+                    .size(14),
+                    button(text(tr!(translations, "start_new_indexing")))
+                        .on_press(WriteMessage::ResetForm)
+                        .padding(10)
+                        .style(button::secondary),
+                ]
+                .spacing(10),
+            ]
             .spacing(15)
-            .into()
+            .into(),
+        }
     }
 
     fn form_is_complete(&self) -> bool {
@@ -1373,43 +1381,63 @@ impl WritePage {
                 Task::none()
             }
             WriteMessage::WriteSubmit => self.start_indexing(),
-            WriteMessage::IndexingFinished(count) => {
-                self.is_indexing = false;
-                self.is_finished = true;
-                self.files_indexed = count;
+            WriteMessage::ScanDirectoryFinished(scanned_files) => {
+                self.insert_in_database(scanned_files)
+            }
+            WriteMessage::InsertInDatabaseFinished(count) => {
+                self.state = IndexingState::Completed {
+                    files_indexed: count,
+                };
                 Task::none()
             }
             WriteMessage::ResetForm => {
                 self.category.clear();
                 self.drive.clear();
                 self.directory = None;
-                self.is_indexing = false;
-                self.is_finished = false;
-                self.files_indexed = 0;
+                self.state = IndexingState::Ready;
                 text_input::focus(self.category_input_id.clone())
             }
         }
     }
 
     fn start_indexing(&mut self) -> Task<WriteMessage> {
-        if !self.form_is_complete() || self.is_indexing {
+        if self.state != IndexingState::Ready {
             return Task::none();
         }
+        self.state = IndexingState::Scanning;
 
-        self.is_indexing = true;
         let indexing_use_case = self.indexing_use_case.clone();
-        let category = self.category.clone();
-        let drive = self.drive.clone();
         let directory = self.directory.clone().unwrap();
 
         Task::perform(
             async move {
                 indexing_use_case
-                    .index_directory(category, drive, directory)
+                    .scan_directory(directory)
+                    .await
+                    .unwrap_or(Vec::new())
+            },
+            WriteMessage::ScanDirectoryFinished,
+        )
+    }
+
+    fn insert_in_database(&mut self, files: Vec<FileEntry>) -> Task<WriteMessage> {
+        if self.state != IndexingState::Scanning {
+            return Task::none();
+        }
+        self.state = IndexingState::Saving;
+
+        let indexing_use_case = self.indexing_use_case.clone();
+        let category = self.category.clone();
+        let drive = self.drive.clone();
+
+        Task::perform(
+            async move {
+                indexing_use_case
+                    .insert_in_database(category, drive, files)
                     .await
                     .unwrap_or(0)
             },
-            WriteMessage::IndexingFinished,
+            WriteMessage::InsertInDatabaseFinished,
         )
     }
 }
