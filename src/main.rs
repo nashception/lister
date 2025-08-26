@@ -956,10 +956,18 @@ impl ReadPage {
         if let (Some(cached), Some(query)) = (&self.cached_results, &self.cached_query) {
             if *query == self.search_query {
                 let start = self.current_page_index * ITEMS_PER_PAGE;
-                let end = (start + ITEMS_PER_PAGE).min(cached.len());
-                self.current_files = cached[start..end].to_vec();
-                self.total_count = cached.len() as i64;
-                return Task::none();
+                if start < cached.len() {
+                    let end = (start + ITEMS_PER_PAGE).min(cached.len());
+                    self.current_files = cached[start..end].to_vec();
+                    return Task::none();
+                }
+            }
+        }
+
+        if let Some(query) = &self.cached_query {
+            if *query != self.search_query {
+                self.cached_results = None;
+                self.cached_query = None;
             }
         }
 
@@ -1213,18 +1221,19 @@ impl ReadPage {
     }
 
     fn process_loaded_files(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
-        if result.total_count <= CACHED_SIZE && !self.search_query.is_empty() {
+        if result.total_count <= CACHED_SIZE
+            && !self.search_query.is_empty()
+            && self.current_page_index == 0
+        {
             self.cached_results = Some(result.items.clone());
             self.cached_query = Some(self.search_query.clone());
             let start = self.current_page_index * ITEMS_PER_PAGE;
             let end = (start + ITEMS_PER_PAGE).min(result.items.len());
             self.current_files = result.items[start..end].to_vec();
-            self.total_count = result.items.len() as i64;
+            self.total_count = result.total_count;
         } else {
             self.current_files = result.items;
             self.total_count = result.total_count;
-            self.cached_results = None;
-            self.cached_query = None;
         }
 
         scrollable::snap_to(self.scroll_bar_id.clone(), RelativeOffset::START)
