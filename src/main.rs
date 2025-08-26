@@ -25,6 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf, StripPrefixError};
 use std::process::exit;
 use std::sync::{Arc, LazyLock};
+use iced::keyboard::Modifiers;
 use tokio::runtime::Runtime;
 use tokio::task::JoinError;
 use walkdir::WalkDir;
@@ -855,6 +856,7 @@ enum AppMessage {
     Read(ReadMessage),
     Write(WriteMessage),
     TabPressed { shift: bool },
+    ChangePage,
 }
 
 #[derive(Clone, Debug)]
@@ -1768,6 +1770,12 @@ impl ListerApp {
                     widget::focus_next()
                 }
             }
+            AppMessage::ChangePage => {
+                match self.current_page {
+                    Page::Read(_) => self.update(AppMessage::GoToWrite),
+                    Page::Write(_) => self.update(AppMessage::GoToRead),
+                }
+            }
         }
     }
 
@@ -1792,6 +1800,7 @@ impl ListerApp {
                 return None;
             };
             match (key, modifiers) {
+                (Named::Tab, Modifiers::CTRL) => Some(AppMessage::ChangePage),
                 (Named::Tab, _) => Some(AppMessage::TabPressed {
                     shift: modifiers.shift(),
                 }),
