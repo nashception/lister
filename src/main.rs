@@ -14,7 +14,8 @@ use diesel::{Associations, Identifiable, Insertable, Queryable, RunQueryDsl, Sql
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use humansize::{format_size, DECIMAL};
 use iced::keyboard::key::Named;
-use iced::widget::scrollable::RelativeOffset;
+use iced::keyboard::Modifiers;
+use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset};
 use iced::widget::{button, column, row, scrollable, text, text_input, Row, Rule, Space};
 use iced::window::{icon, Icon, Settings};
 use iced::{keyboard, widget, Alignment, Element, Length, Subscription, Task};
@@ -25,7 +26,6 @@ use std::fs;
 use std::path::{Path, PathBuf, StripPrefixError};
 use std::process::exit;
 use std::sync::{Arc, LazyLock};
-use iced::keyboard::Modifiers;
 use tokio::runtime::Runtime;
 use tokio::task::JoinError;
 use walkdir::WalkDir;
@@ -870,9 +870,22 @@ enum ReadMessage {
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
-    FilesLoaded((u64, PaginatedResult)),
-    ArrowLeftPressed { shift: bool },
-    ArrowRightPressed { shift: bool },
+    FilesLoaded {
+        task_id: u64,
+        result: PaginatedResult,
+    },
+    ArrowLeftPressed {
+        shift: bool,
+    },
+    ArrowRightPressed {
+        shift: bool,
+    },
+    ArrowUpPressed {
+        shift: bool,
+    },
+    ArrowDownPressed {
+        shift: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -997,7 +1010,7 @@ impl ReadPage {
                 });
                 (task_id, result)
             },
-            |(finished_task_id, result)| ReadMessage::FilesLoaded((finished_task_id, result)),
+            |(task_id, result)| ReadMessage::FilesLoaded { task_id, result },
         )
     }
 
@@ -1164,14 +1177,10 @@ impl ReadPage {
             ReadMessage::NextPage => self.next_page(),
             ReadMessage::FirstPage => self.navigate_to_page(0),
             ReadMessage::LastPage => self.navigate_to_page(self.total_pages().saturating_sub(1)),
-            ReadMessage::SearchSubmit => {
-                self.current_page_index = 0;
-                self.load_current_page()
-            }
+            ReadMessage::SearchSubmit => self.process_new_search(),
             ReadMessage::SearchClear => {
                 self.search_query.clear();
-                self.current_page_index = 0;
-                self.load_current_page()
+                self.process_new_search()
             }
             ReadMessage::ContentChanged(content) => {
                 self.search_query = content;
@@ -1181,42 +1190,12 @@ impl ReadPage {
                 self.page_input_value = page_number;
                 Task::none()
             }
-            ReadMessage::PageInputSubmit => {
-                if let Ok(page) = self.page_input_value.parse::<usize>() {
-                    if page > 0 && page <= self.total_pages() {
-                        self.navigate_to_page(page - 1)
-                    } else {
-                        Task::none()
-                    }
-                } else {
-                    Task::none()
-                }
-            }
-            ReadMessage::FilesLoaded((task_id, result)) => {
-                self.handle_files_loaded(task_id, result)
-            }
-            ReadMessage::ArrowLeftPressed { shift } => {
-                if self.current_page_index > 0 {
-                    self.update(if shift {
-                        ReadMessage::FirstPage
-                    } else {
-                        ReadMessage::PrevPage
-                    })
-                } else {
-                    Task::none()
-                }
-            }
-            ReadMessage::ArrowRightPressed { shift } => {
-                if self.current_page_index < self.total_pages().saturating_sub(1) {
-                    self.update(if shift {
-                        ReadMessage::LastPage
-                    } else {
-                        ReadMessage::NextPage
-                    })
-                } else {
-                    Task::none()
-                }
-            }
+            ReadMessage::PageInputSubmit => self.process_page_input(),
+            ReadMessage::FilesLoaded { task_id, result } => self.handle_files_loaded(task_id, result),
+            ReadMessage::ArrowLeftPressed { shift } => self.handle_left(shift),
+            ReadMessage::ArrowRightPressed { shift } => self.handle_right(shift),
+            ReadMessage::ArrowUpPressed { shift } => self.scroll(-30., shift),
+            ReadMessage::ArrowDownPressed { shift } => self.scroll(30., shift),
         }
     }
 
@@ -1236,6 +1215,23 @@ impl ReadPage {
     fn navigate_to_page(&mut self, page_index: usize) -> Task<ReadMessage> {
         self.current_page_index = page_index;
         self.load_current_page()
+    }
+
+    fn process_new_search(&mut self) -> Task<ReadMessage> {
+        self.current_page_index = 0;
+        self.load_current_page()
+    }
+
+    fn process_page_input(&mut self) -> Task<ReadMessage> {
+        if let Ok(page) = self.page_input_value.parse::<usize>() {
+            if page > 0 && page <= self.total_pages() {
+                self.navigate_to_page(page - 1)
+            } else {
+                Task::none()
+            }
+        } else {
+            Task::none()
+        }
     }
 
     fn handle_files_loaded(&mut self, task_id: u64, result: PaginatedResult) -> Task<ReadMessage> {
@@ -1265,6 +1261,38 @@ impl ReadPage {
         scrollable::snap_to(self.scroll_bar_id.clone(), RelativeOffset::START)
     }
 
+    fn handle_left(&mut self, shift: bool) -> Task<ReadMessage> {
+        if self.current_page_index > 0 {
+            self.update(if shift {
+                ReadMessage::FirstPage
+            } else {
+                ReadMessage::PrevPage
+            })
+        } else {
+            Task::none()
+        }
+    }
+
+    fn handle_right(&mut self, shift: bool) -> Task<ReadMessage> {
+        if self.current_page_index < self.total_pages().saturating_sub(1) {
+            self.update(if shift {
+                ReadMessage::LastPage
+            } else {
+                ReadMessage::NextPage
+            })
+        } else {
+            Task::none()
+        }
+    }
+
+    fn scroll(&self, dy: f32, shift: bool) -> Task<ReadMessage> {
+        let offset = if shift { dy * 33. } else { dy };
+        scrollable::scroll_by(
+            self.scroll_bar_id.clone(),
+            AbsoluteOffset { x: 0.0, y: offset },
+        )
+    }
+
     fn subscription(&self) -> Subscription<ReadMessage> {
         keyboard::on_key_press(|key, modifiers| {
             let keyboard::Key::Named(key) = key else {
@@ -1275,6 +1303,12 @@ impl ReadPage {
                     shift: modifiers.shift(),
                 }),
                 (Named::ArrowRight, _) => Some(ReadMessage::ArrowRightPressed {
+                    shift: modifiers.shift(),
+                }),
+                (Named::ArrowUp, _) => Some(ReadMessage::ArrowUpPressed {
+                    shift: modifiers.shift(),
+                }),
+                (Named::ArrowDown, _) => Some(ReadMessage::ArrowDownPressed {
                     shift: modifiers.shift(),
                 }),
                 _ => None,
@@ -1770,12 +1804,10 @@ impl ListerApp {
                     widget::focus_next()
                 }
             }
-            AppMessage::ChangePage => {
-                match self.current_page {
-                    Page::Read(_) => self.update(AppMessage::GoToWrite),
-                    Page::Write(_) => self.update(AppMessage::GoToRead),
-                }
-            }
+            AppMessage::ChangePage => match self.current_page {
+                Page::Read(_) => self.update(AppMessage::GoToWrite),
+                Page::Write(_) => self.update(AppMessage::GoToRead),
+            },
         }
     }
 
