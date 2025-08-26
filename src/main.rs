@@ -869,6 +869,8 @@ enum ReadMessage {
     ContentChanged(String),
     SearchClear,
     FilesLoaded((u64, PaginatedResult)),
+    ArrowLeftPressed { shift: bool },
+    ArrowRightPressed { shift: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -924,7 +926,6 @@ struct ReadPage {
     total_count: i64,
     current_page_index: usize,
     active_task_id: u64,
-    search_input_id: text_input::Id,
     scroll_bar_id: scrollable::Id,
 }
 
@@ -940,7 +941,6 @@ impl ReadPage {
             total_count: 0,
             current_page_index: 0,
             active_task_id: 0,
-            search_input_id: text_input::Id::unique(),
             scroll_bar_id: scrollable::Id::unique(),
         };
         let task = page.load_current_page();
@@ -1015,7 +1015,6 @@ impl ReadPage {
         translations: &HashMap<String, String>,
     ) -> Element<'_, ReadMessage> {
         let search_input = text_input(&tr!(translations, "search_placeholder"), &self.search_query)
-            .id(self.search_input_id.clone())
             .on_input(ReadMessage::ContentChanged)
             .on_submit(ReadMessage::SearchSubmit)
             .padding(10)
@@ -1159,17 +1158,8 @@ impl ReadPage {
 
     fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
         match message {
-            ReadMessage::PrevPage => {
-                self.navigate_to_page(self.current_page_index.saturating_sub(1))
-            }
-            ReadMessage::NextPage => {
-                let total_pages = self.total_pages();
-                if self.current_page_index + 1 < total_pages {
-                    self.navigate_to_page(self.current_page_index + 1)
-                } else {
-                    Task::none()
-                }
-            }
+            ReadMessage::PrevPage => self.previous_page(),
+            ReadMessage::NextPage => self.next_page(),
             ReadMessage::FirstPage => self.navigate_to_page(0),
             ReadMessage::LastPage => self.navigate_to_page(self.total_pages().saturating_sub(1)),
             ReadMessage::SearchSubmit => {
@@ -1203,6 +1193,41 @@ impl ReadPage {
             ReadMessage::FilesLoaded((task_id, result)) => {
                 self.handle_files_loaded(task_id, result)
             }
+            ReadMessage::ArrowLeftPressed { shift } => {
+                if self.current_page_index > 0 {
+                    self.update(if shift {
+                        ReadMessage::FirstPage
+                    } else {
+                        ReadMessage::PrevPage
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            ReadMessage::ArrowRightPressed { shift } => {
+                if self.current_page_index < self.total_pages().saturating_sub(1) {
+                    self.update(if shift {
+                        ReadMessage::LastPage
+                    } else {
+                        ReadMessage::NextPage
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+        }
+    }
+
+    fn previous_page(&mut self) -> Task<ReadMessage> {
+        self.navigate_to_page(self.current_page_index.saturating_sub(1))
+    }
+
+    fn next_page(&mut self) -> Task<ReadMessage> {
+        let total_pages = self.total_pages();
+        if self.current_page_index + 1 < total_pages {
+            self.navigate_to_page(self.current_page_index + 1)
+        } else {
+            Task::none()
         }
     }
 
@@ -1217,7 +1242,6 @@ impl ReadPage {
         }
 
         self.process_loaded_files(result)
-            .chain(text_input::focus(self.search_input_id.clone()))
     }
 
     fn process_loaded_files(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
@@ -1237,6 +1261,23 @@ impl ReadPage {
         }
 
         scrollable::snap_to(self.scroll_bar_id.clone(), RelativeOffset::START)
+    }
+
+    fn subscription(&self) -> Subscription<ReadMessage> {
+        keyboard::on_key_press(|key, modifiers| {
+            let keyboard::Key::Named(key) = key else {
+                return None;
+            };
+            match (key, modifiers) {
+                (Named::ArrowLeft, _) => Some(ReadMessage::ArrowLeftPressed {
+                    shift: modifiers.shift(),
+                }),
+                (Named::ArrowRight, _) => Some(ReadMessage::ArrowRightPressed {
+                    shift: modifiers.shift(),
+                }),
+                _ => None,
+            }
+        })
     }
 }
 
@@ -1556,6 +1597,24 @@ impl WritePage {
             WriteMessage::InsertInDatabaseFinished,
         )
     }
+
+    fn subscription(&self) -> Subscription<WriteMessage> {
+        // keyboard::on_key_press(|key, modifiers| {
+        //     let keyboard::Key::Named(key) = key else {
+        //         return None;
+        //     };
+        //     match (key, modifiers) {
+        //         (Named::Tab, _) => Some(ReadMessage::TabPressed {
+        //             shift: modifiers.shift(),
+        //         }),
+        //         (Named::ArrowLeft, _) => Some(ReadMessage::ArrowLeftPressed {
+        //             shift: modifiers.shift(),
+        //         }),
+        //         _ => None,
+        //     }
+        // })
+        Subscription::none()
+    }
 }
 
 // Main Application
@@ -1727,7 +1786,8 @@ impl ListerApp {
     }
 
     fn subscription(&self) -> Subscription<AppMessage> {
-        keyboard::on_key_press(|key, modifiers| {
+        let mut subscriptions = vec![];
+        let app_subscription = keyboard::on_key_press(|key, modifiers| {
             let keyboard::Key::Named(key) = key else {
                 return None;
             };
@@ -1737,7 +1797,15 @@ impl ListerApp {
                 }),
                 _ => None,
             }
-        })
+        });
+        let page_subscription = match &self.current_page {
+            Page::Read(read_page) => read_page.subscription().map(AppMessage::Read),
+            Page::Write(write_page) => write_page.subscription().map(AppMessage::Write),
+        };
+        subscriptions.push(app_subscription);
+        subscriptions.push(page_subscription);
+
+        Subscription::batch(subscriptions)
     }
 }
 
