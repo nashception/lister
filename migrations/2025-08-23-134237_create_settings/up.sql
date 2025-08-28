@@ -4,4 +4,5 @@ CREATE TABLE settings
     value TEXT
 );
 
-INSERT INTO settings VALUES ('language', 'en');
+INSERT INTO settings
+VALUES ('language', 'en');
