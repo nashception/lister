@@ -2,6 +2,8 @@ use crate::ui::utils::translation::tr_impl;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
+use crate::domain::entities::file_entry::FileWithMetadata;
 use crate::domain::entities::pagination::PaginatedResult;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
@@ -14,7 +16,6 @@ use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::widget::column;
 use iced::{keyboard, Element, Subscription, Task};
-use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
 
 pub struct ReadPage {
     query_use_case: Arc<dyn FileQueryUseCase>,
@@ -23,6 +24,7 @@ pub struct ReadPage {
     file_list: FileList,
     cache: Cache,
     active_task_id: u64,
+    is_cache_warming: bool,
 }
 
 impl ReadPage {
@@ -34,6 +36,7 @@ impl ReadPage {
             file_list: FileList::new(),
             cache: Cache::new(),
             active_task_id: 0,
+            is_cache_warming: false,
         };
         let task = page.load_current_page();
         (page, task)
@@ -116,7 +119,7 @@ impl ReadPage {
             ITEMS_PER_PAGE,
         ) {
             self.file_list.set_files(files);
-            return Task::none();
+            return self.file_list.snap_to_top();
         }
 
         if !self.cache.is_valid_for(&self.search.query) {
@@ -128,23 +131,45 @@ impl ReadPage {
         let search_query = self.search.query.clone();
         let query_use_case = self.query_use_case.clone();
         let page = self.pagination.current_page_index;
+        let ipp = self.pagination.items_per_page;
 
         Task::perform(
             async move {
-                let result = if search_query.is_empty() {
-                    query_use_case.list_files(page, ITEMS_PER_PAGE).await
-                } else {
-                    query_use_case
-                        .search_files(&search_query, page, ITEMS_PER_PAGE)
+                if !search_query.is_empty() {
+                    let count = query_use_case
+                        .get_search_count(&search_query)
                         .await
+                        .unwrap_or(0);
+                    if count <= CACHED_SIZE {
+                        let full = query_use_case
+                            .search_files(&search_query, 0, count as usize)
+                            .await;
+                        return (
+                            task_id,
+                            full.unwrap_or_else(|err| {
+                                popup_error(err);
+                                PaginatedResult {
+                                    items: vec![],
+                                    total_count: 0,
+                                }
+                            }),
+                        );
+                    }
                 }
-                .unwrap_or_else(|error| {
-                    popup_error(error);
+
+                let result = if search_query.is_empty() {
+                    query_use_case.list_files(page, ipp).await
+                } else {
+                    query_use_case.search_files(&search_query, page, ipp).await
+                }
+                .unwrap_or_else(|err| {
+                    popup_error(err);
                     PaginatedResult {
                         items: vec![],
                         total_count: 0,
                     }
                 });
+
                 (task_id, result)
             },
             |(task_id, result)| ReadMessage::FilesLoaded { task_id, result },
@@ -193,21 +218,102 @@ impl ReadPage {
     }
 
     fn handle_files_loaded(&mut self, task_id: u64, result: PaginatedResult) -> Task<ReadMessage> {
-        if task_id != self.active_task_id {
+        if self.is_stale_task(task_id) {
             return Task::none();
         }
 
-        if result.total_count <= CACHED_SIZE
-            && !self.search.query.is_empty()
+        self.update_total_count(&result);
+
+        if self.should_warm_cache(&result) {
+            self.handle_small_dataset(result)
+        } else {
+            self.show_page(result.items)
+        }
+    }
+
+    fn is_stale_task(&self, task_id: u64) -> bool {
+        task_id != self.active_task_id
+    }
+
+    fn update_total_count(&mut self, result: &PaginatedResult) {
+        self.pagination.total_count = result.total_count;
+    }
+
+    fn should_warm_cache(&self, result: &PaginatedResult) -> bool {
+        result.total_count > 0
+            && result.total_count <= CACHED_SIZE
             && self.pagination.current_page_index == 0
-        {
-            self.cache
-                .store(self.search.query.clone(), result.items.clone());
+    }
+
+    fn handle_small_dataset(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
+        // Case A: the result already contains the full dataset -> store & show slice
+        if result.items.len() == result.total_count as usize {
+            return self.store_full_and_show_page(result.items);
         }
 
-        self.file_list.set_files(result.items);
-        self.pagination.total_count = result.total_count;
+        // Case B: we only received a single page; start warming if not already warming
+        if !self.is_cache_warming {
+            self.start_cache_warm(result.items)
+        } else {
+            self.show_page(result.items)
+        }
+    }
 
+    fn store_full_and_show_page(&mut self, full_items: Vec<FileWithMetadata>) -> Task<ReadMessage> {
+        // store full dataset in cache
+        self.cache
+            .store(self.search.query.clone(), full_items.clone());
+
+        if let Some(page_files) = self.cache.get_page(
+            &self.search.query,
+            self.pagination.current_page_index,
+            ITEMS_PER_PAGE,
+        ) {
+            self.file_list.set_files(page_files);
+        } else {
+            self.file_list.set_files(Vec::new());
+        }
+
+        self.is_cache_warming = false;
+        self.file_list.snap_to_top()
+    }
+
+    fn start_cache_warm(&mut self, current_page_items: Vec<FileWithMetadata>) -> Task<ReadMessage> {
+        // mark warming and show current page immediately
+        self.is_cache_warming = true;
+        self.file_list.set_files(current_page_items);
+
+        // bump active_task_id so the full-fetch result is considered fresh
+        self.active_task_id += 1;
+        let full_task_id = self.active_task_id;
+
+        let search_query = self.search.query.clone();
+        let query_use_case = self.query_use_case.clone();
+        let total = self.pagination.total_count as usize;
+
+        Task::perform(
+            async move {
+                let full_results = if search_query.is_empty() {
+                    query_use_case.list_files(0, total).await
+                } else {
+                    query_use_case.search_files(&search_query, 0, total).await
+                }
+                .unwrap_or_else(|error| {
+                    popup_error(error);
+                    PaginatedResult {
+                        items: vec![],
+                        total_count: 0,
+                    }
+                });
+
+                (full_task_id, full_results)
+            },
+            |(task_id, result)| ReadMessage::FilesLoaded { task_id, result },
+        )
+    }
+
+    fn show_page(&mut self, items: Vec<FileWithMetadata>) -> Task<ReadMessage> {
+        self.file_list.set_files(items);
         self.file_list.snap_to_top()
     }
 
