@@ -1,6 +1,6 @@
 use crate::ui::utils::translation::tr_impl;
-use iced::widget::{button, column, row, text, text_input};
-use iced::{Element, Length};
+use iced::widget::{button, column, focus_next, row, text, text_input};
+use iced::{Element, Length, Task};
 use std::collections::HashMap;
 
 use crate::tr;
@@ -11,10 +11,13 @@ pub struct Search {
 }
 
 impl Search {
-    pub fn new() -> Self {
-        Self {
-            query: String::new(),
-        }
+    pub fn new() -> (Self, Task<ReadMessage>) {
+        (
+            Self {
+                query: String::new(),
+            },
+            focus_next(),
+        )
     }
 
     pub fn clear(&mut self) {

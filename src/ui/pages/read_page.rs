@@ -29,9 +29,10 @@ pub struct ReadPage {
 
 impl ReadPage {
     pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
+        let (search, search_task) = Search::new();
         let mut page = Self {
             query_use_case,
-            search: Search::new(),
+            search,
             pagination: Pagination::new(ITEMS_PER_PAGE),
             file_list: FileList::new(),
             cache: Cache::new(),
@@ -39,7 +40,7 @@ impl ReadPage {
             is_cache_warming: false,
         };
         let task = page.load_current_page();
-        (page, task)
+        (page, search_task.chain(task))
     }
 
     pub fn title(&self, translations: &HashMap<String, String>) -> String {

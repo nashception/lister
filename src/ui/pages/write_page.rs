@@ -5,7 +5,7 @@ use crate::tr;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
-use iced::widget::{button, column, row, text, text_input, Rule};
+use iced::widget::{button, column, focus_next, row, text, text_input, Rule};
 use iced::{Alignment, Element, Length, Task};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,7 +27,6 @@ pub struct WritePage {
     drive: String,
     directory: Option<PathBuf>,
     state: IndexingState,
-    category_input_id: text_input::Id,
 }
 
 impl WritePage {
@@ -35,7 +34,6 @@ impl WritePage {
         indexing_use_case: Arc<dyn FileIndexingUseCase>,
         directory_picker: Arc<dyn DirectoryPicker>,
     ) -> (Self, Task<WriteMessage>) {
-        let category_input_id = text_input::Id::unique();
         let page = Self {
             indexing_use_case,
             directory_picker,
@@ -43,9 +41,8 @@ impl WritePage {
             drive: String::new(),
             directory: None,
             state: IndexingState::Ready,
-            category_input_id: category_input_id.clone(),
         };
-        (page, text_input::focus(category_input_id))
+        (page, focus_next())
     }
 
     pub fn title(&self, translations: &HashMap<String, String>) -> String {
@@ -57,7 +54,7 @@ impl WritePage {
         let action_section = self.action_section(translations);
         let status_section = self.status_section(translations);
 
-        iced::widget::column![form_section, action_section, status_section]
+        column![form_section, action_section, status_section]
             .spacing(20)
             .padding(20)
             .into()
@@ -96,11 +93,8 @@ impl WritePage {
                 Task::none()
             }
             WriteMessage::ResetForm => {
-                self.category.clear();
-                self.drive.clear();
-                self.directory = None;
                 self.state = IndexingState::Ready;
-                text_input::focus(self.category_input_id.clone())
+                Task::none()
             }
         }
     }
@@ -108,7 +102,6 @@ impl WritePage {
     fn form_section(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
         let category_input = text_input(&tr!(translations, "category_placeholder"), &self.category)
             .on_input(WriteMessage::CategoryChanged)
-            .id(self.category_input_id.clone())
             .padding(10)
             .width(Length::Fill);
 
@@ -119,7 +112,7 @@ impl WritePage {
 
         let directory_section = self.directory_section(translations);
 
-        iced::widget::column![
+        column![
             text(tr!(translations, "file_indexing_setup"))
                 .size(24)
                 .style(text::primary),
@@ -154,7 +147,7 @@ impl WritePage {
             .padding(10)
             .style(button::secondary);
 
-        iced::widget::column![
+        column![
             directory_label,
             row![directory_display, browse_button]
                 .spacing(10)
@@ -192,7 +185,7 @@ impl WritePage {
             text("")
         };
 
-        iced::widget::column![Rule::horizontal(1), submit_button, requirements_text,]
+        column![Rule::horizontal(1), submit_button, requirements_text,]
             .spacing(10)
             .into()
     }
@@ -202,8 +195,8 @@ impl WritePage {
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
         match &self.state {
-            IndexingState::Ready => iced::widget::column![].into(),
-            IndexingState::CleaningDatabase => iced::widget::column![
+            IndexingState::Ready => column![].into(),
+            IndexingState::CleaningDatabase => column![
                 text(tr!(translations, "clean_status"))
                     .size(18)
                     .style(text::primary),
@@ -213,7 +206,7 @@ impl WritePage {
             ]
             .spacing(10)
             .into(),
-            IndexingState::Scanning => iced::widget::column![
+            IndexingState::Scanning => column![
                 text(tr!(translations, "scan_status"))
                     .size(18)
                     .style(text::primary),
@@ -223,7 +216,7 @@ impl WritePage {
             ]
             .spacing(10)
             .into(),
-            IndexingState::Saving => iced::widget::column![
+            IndexingState::Saving => column![
                 text(tr!(translations, "save_status"))
                     .size(18)
                     .style(text::primary),
@@ -233,7 +226,7 @@ impl WritePage {
             ]
             .spacing(10)
             .into(),
-            IndexingState::Completed { files_indexed } => iced::widget::column![
+            IndexingState::Completed { files_indexed } => column![
                 Rule::horizontal(1),
                 column![
                     text(tr!(translations, "done_status"))
