@@ -1,42 +1,39 @@
-use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
-use crate::domain::entities::file_entry::FileWithMetadata;
+use crate::ui::utils::translation::tr_impl;
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use crate::domain::entities::pagination::PaginatedResult;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
+use crate::ui::components::cache::Cache;
+use crate::ui::components::file_list::FileList;
 use crate::ui::components::pagination::Pagination;
 use crate::ui::components::search::Search;
 use crate::ui::messages::read_message::ReadMessage;
-use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::popup_error;
-use humansize::{format_size, DECIMAL};
 use iced::keyboard::key::Named;
-use iced::widget::{column, row, scrollable, text, Rule};
-use iced::{keyboard, Element, Length, Subscription, Task};
-use std::collections::HashMap;
-use std::sync::Arc;
+use iced::widget::column;
+use iced::{keyboard, Element, Subscription, Task};
+use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
 
 pub struct ReadPage {
     query_use_case: Arc<dyn FileQueryUseCase>,
     search: Search,
-    current_files: Vec<FileWithMetadata>,
-    cached_query: Option<String>,
-    cached_results: Option<Vec<FileWithMetadata>>,
-    active_task_id: u64,
-    scroll_bar_id: scrollable::Id,
     pagination: Pagination,
+    file_list: FileList,
+    cache: Cache,
+    active_task_id: u64,
 }
 
 impl ReadPage {
     pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
         let mut page = Self {
             query_use_case,
-            current_files: Vec::new(),
             search: Search::new(),
-            cached_query: None,
-            cached_results: None,
-            active_task_id: 0,
-            scroll_bar_id: scrollable::Id::unique(),
             pagination: Pagination::new(ITEMS_PER_PAGE),
+            file_list: FileList::new(),
+            cache: Cache::new(),
+            active_task_id: 0,
         };
         let task = page.load_current_page();
         (page, task)
@@ -48,7 +45,7 @@ impl ReadPage {
 
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
         let search_section = self.search.view(translations);
-        let files = self.files_section();
+        let files = self.file_list.view();
         let pagination_section = self.pagination.view(translations);
 
         column![search_section, files, pagination_section]
@@ -84,8 +81,8 @@ impl ReadPage {
             }
             ReadMessage::ArrowLeftPressed { shift } => self.handle_left(shift),
             ReadMessage::ArrowRightPressed { shift } => self.handle_right(shift),
-            ReadMessage::ArrowUpPressed { shift } => self.scroll(-30., shift),
-            ReadMessage::ArrowDownPressed { shift } => self.scroll(30., shift),
+            ReadMessage::ArrowUpPressed { shift } => self.file_list.scroll(-30., shift),
+            ReadMessage::ArrowDownPressed { shift } => self.file_list.scroll(30., shift),
         }
     }
 
@@ -113,23 +110,17 @@ impl ReadPage {
     }
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {
-        // Use cached results if available
-        if let (Some(cached), Some(query)) = (&self.cached_results, &self.cached_query) {
-            if *query == self.search.query {
-                let start = self.pagination.current_page_index * ITEMS_PER_PAGE;
-                if start < cached.len() {
-                    let end = (start + ITEMS_PER_PAGE).min(cached.len());
-                    self.current_files = cached[start..end].to_vec();
-                    return Task::none();
-                }
-            }
+        if let Some(files) = self.cache.get_page(
+            &self.search.query,
+            self.pagination.current_page_index,
+            ITEMS_PER_PAGE,
+        ) {
+            self.file_list.set_files(files);
+            return Task::none();
         }
 
-        if let Some(query) = &self.cached_query {
-            if *query != self.search.query {
-                self.cached_results = None;
-                self.cached_query = None;
-            }
+        if !self.cache.is_valid_for(&self.search.query) {
+            self.cache.clear();
         }
 
         self.active_task_id += 1;
@@ -158,34 +149,6 @@ impl ReadPage {
             },
             |(task_id, result)| ReadMessage::FilesLoaded { task_id, result },
         )
-    }
-
-    fn files_section(&'_ self) -> Element<'_, ReadMessage> {
-        let file_rows: Vec<Element<'_, ReadMessage>> = self
-            .current_files
-            .iter()
-            .map(|file| {
-                row![
-                    text(&file.category_name).width(Length::FillPortion(1)),
-                    text(&file.drive_name).width(Length::FillPortion(2)),
-                    text(file.parent_directory()).width(Length::FillPortion(3)),
-                    text(file.filename()).width(Length::FillPortion(4)),
-                    text(format_size(file.size_bytes as u64, DECIMAL))
-                        .width(Length::FillPortion(1))
-                ]
-                .padding(3)
-                .into()
-            })
-            .collect();
-
-        column![
-            Rule::horizontal(1),
-            scrollable(column(file_rows))
-                .id(self.scroll_bar_id.clone())
-                .height(Length::Fill),
-            Rule::horizontal(1),
-        ]
-        .into()
     }
 
     fn previous_page(&mut self) -> Task<ReadMessage> {
@@ -233,29 +196,19 @@ impl ReadPage {
         if task_id != self.active_task_id {
             return Task::none();
         }
-        self.process_loaded_files(result)
-    }
 
-    fn process_loaded_files(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
         if result.total_count <= CACHED_SIZE
             && !self.search.query.is_empty()
             && self.pagination.current_page_index == 0
         {
-            self.cached_results = Some(result.items.clone());
-            self.cached_query = Some(self.search.query.clone());
-            let start = self.pagination.current_page_index * ITEMS_PER_PAGE;
-            let end = (start + ITEMS_PER_PAGE).min(result.items.len());
-            self.current_files = result.items[start..end].to_vec();
-            self.pagination.total_count = result.total_count;
-        } else {
-            self.current_files = result.items;
-            self.pagination.total_count = result.total_count;
+            self.cache
+                .store(self.search.query.clone(), result.items.clone());
         }
 
-        scrollable::snap_to(
-            self.scroll_bar_id.clone(),
-            scrollable::RelativeOffset::START,
-        )
+        self.file_list.set_files(result.items);
+        self.pagination.total_count = result.total_count;
+
+        self.file_list.snap_to_top()
     }
 
     fn handle_left(&mut self, shift: bool) -> Task<ReadMessage> {
@@ -280,13 +233,5 @@ impl ReadPage {
         } else {
             Task::none()
         }
-    }
-
-    fn scroll(&self, dy: f32, shift: bool) -> Task<ReadMessage> {
-        let offset = if shift { dy * 33. } else { dy };
-        scrollable::scroll_by(
-            self.scroll_bar_id.clone(),
-            scrollable::AbsoluteOffset { x: 0.0, y: offset },
-        )
     }
 }
