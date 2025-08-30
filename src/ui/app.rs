@@ -161,7 +161,6 @@ impl ListerApp {
     }
 
     pub fn subscription(&self) -> Subscription<AppMessage> {
-        let mut subscriptions = vec![];
         let app_subscription = keyboard::on_key_press(|key, modifiers| {
             let keyboard::Key::Named(key) = key else {
                 return None;
@@ -176,12 +175,10 @@ impl ListerApp {
         });
         let page_subscription = match &self.current_page {
             Page::Read(read_page) => read_page.subscription().map(AppMessage::Read),
-            Page::Write(write_page) => write_page.subscription().map(AppMessage::Write),
+            Page::Write(_) => Subscription::none(),
         };
-        subscriptions.push(app_subscription);
-        subscriptions.push(page_subscription);
 
-        Subscription::batch(subscriptions)
+        Subscription::batch(vec![app_subscription, page_subscription])
     }
 
     fn lister_icon() -> Option<Icon> {
