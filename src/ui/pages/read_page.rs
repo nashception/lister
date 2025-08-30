@@ -4,19 +4,20 @@ use crate::domain::entities::pagination::PaginatedResult;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
 use crate::ui::components::pagination::Pagination;
+use crate::ui::components::search::Search;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::popup_error;
 use humansize::{format_size, DECIMAL};
 use iced::keyboard::key::Named;
-use iced::widget::{button, column, row, scrollable, text, text_input, Rule};
+use iced::widget::{column, row, scrollable, text, Rule};
 use iced::{keyboard, Element, Length, Subscription, Task};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct ReadPage {
     query_use_case: Arc<dyn FileQueryUseCase>,
-    search_query: String,
+    search: Search,
     current_files: Vec<FileWithMetadata>,
     cached_query: Option<String>,
     cached_results: Option<Vec<FileWithMetadata>>,
@@ -29,8 +30,8 @@ impl ReadPage {
     pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
         let mut page = Self {
             query_use_case,
-            search_query: String::new(),
             current_files: Vec::new(),
+            search: Search::new(),
             cached_query: None,
             cached_results: None,
             active_task_id: 0,
@@ -46,7 +47,7 @@ impl ReadPage {
     }
 
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
-        let search_section = self.search_section(translations);
+        let search_section = self.search.view(translations);
         let files = self.files_section();
         let pagination_section = self.pagination.view(translations);
 
@@ -66,11 +67,11 @@ impl ReadPage {
             }
             ReadMessage::SearchSubmit => self.process_new_search(),
             ReadMessage::SearchClear => {
-                self.search_query.clear();
+                self.search.clear();
                 self.process_new_search()
             }
             ReadMessage::ContentChanged(content) => {
-                self.search_query = content;
+                self.search.query = content;
                 Task::none()
             }
             ReadMessage::PageInputChanged(page_number) => {
@@ -114,7 +115,7 @@ impl ReadPage {
     fn load_current_page(&mut self) -> Task<ReadMessage> {
         // Use cached results if available
         if let (Some(cached), Some(query)) = (&self.cached_results, &self.cached_query) {
-            if *query == self.search_query {
+            if *query == self.search.query {
                 let start = self.pagination.current_page_index * ITEMS_PER_PAGE;
                 if start < cached.len() {
                     let end = (start + ITEMS_PER_PAGE).min(cached.len());
@@ -125,7 +126,7 @@ impl ReadPage {
         }
 
         if let Some(query) = &self.cached_query {
-            if *query != self.search_query {
+            if *query != self.search.query {
                 self.cached_results = None;
                 self.cached_query = None;
             }
@@ -133,7 +134,7 @@ impl ReadPage {
 
         self.active_task_id += 1;
         let task_id = self.active_task_id;
-        let search_query = self.search_query.clone();
+        let search_query = self.search.query.clone();
         let query_use_case = self.query_use_case.clone();
         let page = self.pagination.current_page_index;
 
@@ -157,27 +158,6 @@ impl ReadPage {
             },
             |(task_id, result)| ReadMessage::FilesLoaded { task_id, result },
         )
-    }
-
-    fn search_section(
-        &'_ self,
-        translations: &HashMap<String, String>,
-    ) -> Element<'_, ReadMessage> {
-        let search_input = text_input(&tr!(translations, "search_placeholder"), &self.search_query)
-            .on_input(ReadMessage::ContentChanged)
-            .on_submit(ReadMessage::SearchSubmit)
-            .padding(10)
-            .width(Length::Fill);
-
-        let search_button = button(text(tr!(translations, "search_button")))
-            .on_press(ReadMessage::SearchSubmit)
-            .padding(10);
-
-        let clear_button = button(text(tr!(translations, "clear_button")))
-            .on_press(ReadMessage::SearchClear)
-            .padding(10);
-
-        column![row![search_input, search_button, clear_button].spacing(10)].into()
     }
 
     fn files_section(&'_ self) -> Element<'_, ReadMessage> {
@@ -258,11 +238,11 @@ impl ReadPage {
 
     fn process_loaded_files(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
         if result.total_count <= CACHED_SIZE
-            && !self.search_query.is_empty()
+            && !self.search.query.is_empty()
             && self.pagination.current_page_index == 0
         {
             self.cached_results = Some(result.items.clone());
-            self.cached_query = Some(self.search_query.clone());
+            self.cached_query = Some(self.search.query.clone());
             let start = self.pagination.current_page_index * ITEMS_PER_PAGE;
             let end = (start + ITEMS_PER_PAGE).min(result.items.len());
             self.current_files = result.items[start..end].to_vec();
