@@ -87,30 +87,44 @@ impl ReadPage {
             ReadMessage::ArrowRightPressed { shift } => self.handle_right(shift),
             ReadMessage::ArrowUpPressed { shift } => self.file_list.scroll(-30., shift),
             ReadMessage::ArrowDownPressed { shift } => self.file_list.scroll(30., shift),
+            ReadMessage::ArrowNavigationReleased => self.load_current_page(),
         }
     }
 
     pub fn subscription(&self) -> Subscription<ReadMessage> {
-        keyboard::on_key_press(|key, modifiers| {
-            let keyboard::Key::Named(key) = key else {
-                return None;
-            };
-            match (key, modifiers) {
-                (Named::ArrowLeft, _) => Some(ReadMessage::ArrowLeftPressed {
-                    shift: modifiers.shift(),
-                }),
-                (Named::ArrowRight, _) => Some(ReadMessage::ArrowRightPressed {
-                    shift: modifiers.shift(),
-                }),
-                (Named::ArrowUp, _) => Some(ReadMessage::ArrowUpPressed {
-                    shift: modifiers.shift(),
-                }),
-                (Named::ArrowDown, _) => Some(ReadMessage::ArrowDownPressed {
-                    shift: modifiers.shift(),
-                }),
-                _ => None,
-            }
-        })
+        Subscription::batch([
+            keyboard::on_key_press(|key, modifiers| {
+                let keyboard::Key::Named(key) = key else {
+                    return None;
+                };
+                match (key, modifiers) {
+                    (Named::ArrowLeft, _) => Some(ReadMessage::ArrowLeftPressed {
+                        shift: modifiers.shift(),
+                    }),
+                    (Named::ArrowRight, _) => Some(ReadMessage::ArrowRightPressed {
+                        shift: modifiers.shift(),
+                    }),
+                    (Named::ArrowUp, _) => Some(ReadMessage::ArrowUpPressed {
+                        shift: modifiers.shift(),
+                    }),
+                    (Named::ArrowDown, _) => Some(ReadMessage::ArrowDownPressed {
+                        shift: modifiers.shift(),
+                    }),
+                    _ => None,
+                }
+            }),
+            keyboard::on_key_release(|key, _| {
+                let keyboard::Key::Named(key) = key else {
+                    return None;
+                };
+                match key {
+                    Named::ArrowLeft | Named::ArrowRight => {
+                        Some(ReadMessage::ArrowNavigationReleased)
+                    }
+                    _ => None,
+                }
+            }),
+        ])
     }
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {
@@ -319,26 +333,20 @@ impl ReadPage {
     }
 
     fn handle_left(&mut self, shift: bool) -> Task<ReadMessage> {
-        if self.pagination.current_page_index > 0 {
-            self.update(if shift {
-                ReadMessage::FirstPage
-            } else {
-                ReadMessage::PrevPage
-            })
+        if shift {
+            self.pagination.first_page();
         } else {
-            Task::none()
+            self.pagination.prev();
         }
+        Task::none()
     }
 
     fn handle_right(&mut self, shift: bool) -> Task<ReadMessage> {
-        if self.pagination.current_page_index < self.pagination.total_pages().saturating_sub(1) {
-            self.update(if shift {
-                ReadMessage::LastPage
-            } else {
-                ReadMessage::NextPage
-            })
+        if shift {
+            self.pagination.last_page();
         } else {
-            Task::none()
+            self.pagination.next();
         }
+        Task::none()
     }
 }

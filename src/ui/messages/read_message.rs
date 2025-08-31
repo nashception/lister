@@ -27,4 +27,5 @@ pub enum ReadMessage {
     ArrowDownPressed {
         shift: bool,
     },
+    ArrowNavigationReleased,
 }

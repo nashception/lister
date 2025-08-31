@@ -40,6 +40,14 @@ impl Pagination {
         }
     }
 
+    pub fn first_page(&mut self) -> Option<usize> {
+        self.navigate_to(0)
+    }
+
+    pub fn last_page(&mut self) -> Option<usize> {
+        self.navigate_to(self.total_pages().saturating_sub(1))
+    }
+
     pub fn next(&mut self) -> Option<usize> {
         if self.current_page_index + 1 < self.total_pages() {
             self.current_page_index += 1;
