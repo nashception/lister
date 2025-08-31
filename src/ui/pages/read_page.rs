@@ -67,10 +67,7 @@ impl ReadPage {
                 self.navigate_to_page(self.pagination.total_pages().saturating_sub(1))
             }
             ReadMessage::SearchSubmit => self.process_new_search(),
-            ReadMessage::SearchClear => {
-                self.search.clear();
-                self.process_new_search()
-            }
+            ReadMessage::SearchClear => self.clear_search(),
             ReadMessage::ContentChanged(content) => {
                 self.search.query = content;
                 Task::none()
@@ -88,6 +85,12 @@ impl ReadPage {
             ReadMessage::ArrowUpPressed { shift } => self.file_list.scroll(-30., shift),
             ReadMessage::ArrowDownPressed { shift } => self.file_list.scroll(30., shift),
             ReadMessage::ArrowNavigationReleased => self.load_current_page(),
+            ReadMessage::PageUpPressed => self.update(ReadMessage::ArrowUpPressed { shift: true }),
+            ReadMessage::PageDownPressed => {
+                self.update(ReadMessage::ArrowDownPressed { shift: true })
+            }
+            ReadMessage::HomePressed => self.file_list.snap_to_top(),
+            ReadMessage::EndPressed => self.file_list.snap_to_bottom(),
         }
     }
 
@@ -110,6 +113,10 @@ impl ReadPage {
                     (Named::ArrowDown, _) => Some(ReadMessage::ArrowDownPressed {
                         shift: modifiers.shift(),
                     }),
+                    (Named::PageUp, _) => Some(ReadMessage::PageUpPressed),
+                    (Named::PageDown, _) => Some(ReadMessage::PageDownPressed),
+                    (Named::Home, _) => Some(ReadMessage::HomePressed),
+                    (Named::End, _) => Some(ReadMessage::EndPressed),
                     _ => None,
                 }
             }),
@@ -218,6 +225,11 @@ impl ReadPage {
     fn process_new_search(&mut self) -> Task<ReadMessage> {
         self.pagination.reset();
         self.load_current_page()
+    }
+
+    fn clear_search(&mut self) -> Task<ReadMessage> {
+        self.search.clear();
+        self.process_new_search()
     }
 
     fn process_page_input(&mut self) -> Task<ReadMessage> {

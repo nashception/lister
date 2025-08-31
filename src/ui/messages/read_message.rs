@@ -28,4 +28,8 @@ pub enum ReadMessage {
         shift: bool,
     },
     ArrowNavigationReleased,
+    PageUpPressed,
+    PageDownPressed,
+    HomePressed,
+    EndPressed,
 }

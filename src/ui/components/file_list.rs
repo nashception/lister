@@ -56,6 +56,13 @@ impl FileList {
         )
     }
 
+    pub fn snap_to_bottom(&self) -> iced::Task<ReadMessage> {
+        scrollable::snap_to(
+            self.scroll_bar_id.clone(),
+            scrollable::RelativeOffset::END,
+        )
+    }
+
     pub fn scroll(&self, dy: f32, shift: bool) -> iced::Task<ReadMessage> {
         let offset = if shift { dy * 33. } else { dy };
         scrollable::scroll_by(
