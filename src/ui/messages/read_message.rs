@@ -11,10 +11,7 @@ pub enum ReadMessage {
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
-    FilesLoaded {
-        task_id: u64,
-        result: PaginatedResult,
-    },
+    FilesLoaded(PaginatedResult),
     ArrowLeftPressed {
         shift: bool,
     },

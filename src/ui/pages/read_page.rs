@@ -23,7 +23,6 @@ pub struct ReadPage {
     pagination: Pagination,
     file_list: FileList,
     cache: Cache,
-    active_task_id: u64,
     is_cache_warming: bool,
 }
 
@@ -36,7 +35,6 @@ impl ReadPage {
             pagination: Pagination::new(ITEMS_PER_PAGE),
             file_list: FileList::new(),
             cache: Cache::new(),
-            active_task_id: 0,
             is_cache_warming: false,
         };
         let task = page.load_current_page();
@@ -77,9 +75,7 @@ impl ReadPage {
                 Task::none()
             }
             ReadMessage::PageInputSubmit => self.process_page_input(),
-            ReadMessage::FilesLoaded { task_id, result } => {
-                self.handle_files_loaded(task_id, result)
-            }
+            ReadMessage::FilesLoaded(result) => self.handle_files_loaded(result),
             ReadMessage::ArrowLeftPressed { shift } => self.handle_left(shift),
             ReadMessage::ArrowRightPressed { shift } => self.handle_right(shift),
             ReadMessage::ArrowUpPressed { shift } => self.file_list.scroll(-30., shift),
@@ -148,8 +144,6 @@ impl ReadPage {
             self.cache.clear();
         }
 
-        self.active_task_id += 1;
-        let task_id = self.active_task_id;
         let search_query = self.search.query.clone();
         let query_use_case = self.query_use_case.clone();
         let page = self.pagination.current_page_index;
@@ -166,20 +160,17 @@ impl ReadPage {
                         let full = query_use_case
                             .search_files(&search_query, 0, count as usize)
                             .await;
-                        return (
-                            task_id,
-                            full.unwrap_or_else(|err| {
-                                popup_error(err);
-                                PaginatedResult {
-                                    items: vec![],
-                                    total_count: 0,
-                                }
-                            }),
-                        );
+                        return full.unwrap_or_else(|err| {
+                            popup_error(err);
+                            PaginatedResult {
+                                items: vec![],
+                                total_count: 0,
+                            }
+                        });
                     }
                 }
 
-                let result = if search_query.is_empty() {
+                if search_query.is_empty() {
                     query_use_case.list_files(page, ipp).await
                 } else {
                     query_use_case.search_files(&search_query, page, ipp).await
@@ -190,11 +181,9 @@ impl ReadPage {
                         items: vec![],
                         total_count: 0,
                     }
-                });
-
-                (task_id, result)
+                })
             },
-            |(task_id, result)| ReadMessage::FilesLoaded { task_id, result },
+            ReadMessage::FilesLoaded,
         )
     }
 
@@ -244,11 +233,7 @@ impl ReadPage {
         }
     }
 
-    fn handle_files_loaded(&mut self, task_id: u64, result: PaginatedResult) -> Task<ReadMessage> {
-        if self.is_stale_task(task_id) {
-            return Task::none();
-        }
-
+    fn handle_files_loaded(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
         self.update_total_count(&result);
 
         if self.should_warm_cache(&result) {
@@ -256,10 +241,6 @@ impl ReadPage {
         } else {
             self.show_page(result.items)
         }
-    }
-
-    fn is_stale_task(&self, task_id: u64) -> bool {
-        task_id != self.active_task_id
     }
 
     fn update_total_count(&mut self, result: &PaginatedResult) {
@@ -310,17 +291,13 @@ impl ReadPage {
         self.is_cache_warming = true;
         self.file_list.set_files(current_page_items);
 
-        // bump active_task_id so the full-fetch result is considered fresh
-        self.active_task_id += 1;
-        let full_task_id = self.active_task_id;
-
         let search_query = self.search.query.clone();
         let query_use_case = self.query_use_case.clone();
         let total = self.pagination.total_count as usize;
 
         Task::perform(
             async move {
-                let full_results = if search_query.is_empty() {
+                if search_query.is_empty() {
                     query_use_case.list_files(0, total).await
                 } else {
                     query_use_case.search_files(&search_query, 0, total).await
@@ -331,11 +308,9 @@ impl ReadPage {
                         items: vec![],
                         total_count: 0,
                     }
-                });
-
-                (full_task_id, full_results)
+                })
             },
-            |(task_id, result)| ReadMessage::FilesLoaded { task_id, result },
+            ReadMessage::FilesLoaded,
         )
     }
 
