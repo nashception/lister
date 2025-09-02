@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(PartialEq)]
 enum IndexingState {
     Ready,
     CleaningDatabase,
