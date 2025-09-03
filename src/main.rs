@@ -1,5 +1,4 @@
 #![windows_subsystem = "windows"]
-extern crate libsqlite3_sys;
 
 use lister::ui::app::ListerApp;
 

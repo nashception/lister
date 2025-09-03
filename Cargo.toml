@@ -1,24 +1,42 @@
 [package]
 name = "lister"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 publish = false
 
 [dependencies]
-# to have sqlite libraries bundled in windows binary
-libsqlite3-sys = { version = "*", features = ["bundled-windows"] }
 
-async-trait = "*"
-diesel = { version = "*", features = ["r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"] }
-diesel_migrations = "*"
-humansize = "*"
-iced = { version = "*", features = ["image"] }
-rfd = "*"
-serde_json = "*"
-thiserror = "*"
-tokio = { version = "*", features = ["rt-multi-thread"] }
-walkdir = "*"
+# Database
+diesel = { version = "2.2", features = ["r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"] }
+diesel_migrations = "2.2"
+
+# Async
+async-trait = "0.1"
+tokio = { version = "1.47", features = ["rt-multi-thread"] }
+
+# GUI
+iced = { version = "0.13", features = ["image"] }
+
+# File system
+rfd = "0.15"
+walkdir = "2.5"
+
+# Utilities
+humansize = "2.1"
+serde_json = "1.0"
+thiserror = "2.0"
 
 [dev-dependencies]
-tempfile = "*"
-tokio = { version = "*", features = ["macros"] }
+tempfile = "3.21"
+tokio = { version = "1.47", features = ["macros"] }
+
+[target.'cfg(windows)'.dependencies]
+libsqlite3-sys = { version = "0.35", features = ["bundled-windows"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+incremental = true
