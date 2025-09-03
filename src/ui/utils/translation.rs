@@ -10,15 +10,22 @@ macro_rules! tr {
     };
 }
 
-pub fn tr_impl(translations: &HashMap<String, String>, key: &str, params: &[(&str, &str)]) -> String {
-    let mut text = translations
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| key.to_string());
-
-    for (k, v) in params {
-        text = text.replace(&format!("{{{}}}", k), v);
+pub fn tr_impl(
+    translations: &HashMap<String, String>,
+    key: &str,
+    params: &[(&str, &str)],
+) -> String {
+    let translation_value = translations.get(key);
+    if params.is_empty() {
+        return translation_value
+            .cloned()
+            .unwrap_or_else(|| key.to_string());
     }
 
-    text
+    let text = translation_value.map_or(key, |value| value.as_str());
+    let mut result = text.to_string();
+    for (k, v) in params {
+        result = result.replace(&format!("{{{}}}", k), v);
+    }
+    result
 }
