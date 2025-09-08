@@ -1,27 +1,17 @@
 use crate::domain::entities::language::Language;
-use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
-use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
-use crate::domain::ports::primary::language_use_case::LanguageManagementUseCase;
-use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
-use crate::domain::services::file_indexing_service::FileIndexingService;
-use crate::domain::services::file_query_service::FileQueryService;
-use crate::domain::services::language_service::LanguageService;
-use crate::infrastructure::database::sqlite_repository::SqliteFileRepository;
-use crate::infrastructure::filesystem::native_directory_picker::NativeDirectoryPicker;
-use crate::infrastructure::i18n::json_translation_loader::JsonTranslationLoader;
 use crate::tr;
+use crate::ui::app_factory::ListerAppService;
 use crate::ui::messages::app_message::AppMessage;
 use crate::ui::pages::read_page::ReadPage;
 use crate::ui::pages::write_page::WritePage;
 use crate::ui::utils::translation::tr_impl;
-use crate::utils::dialogs::{popup_error, popup_error_and_exit};
+use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;
 use iced::widget::{button, row, text, Row, Space};
 use iced::window::{icon, Icon, Settings};
 use iced::{keyboard, widget, Alignment, Element, Length, Subscription, Task};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 enum Page {
     Read(ReadPage),
@@ -29,44 +19,21 @@ enum Page {
 }
 
 pub struct ListerApp {
-    query_use_case: Arc<dyn FileQueryUseCase>,
-    indexing_use_case: Arc<dyn FileIndexingUseCase>,
-    language_use_case: Arc<dyn LanguageManagementUseCase>,
-    directory_picker: Arc<dyn DirectoryPicker>,
+    service: ListerAppService,
     current_language: Language,
     translations: HashMap<String, String>,
     current_page: Page,
 }
 
 impl ListerApp {
-    pub fn new() -> (Self, Task<AppMessage>) {
-        // Create the single repository instance
-        let repository = Arc::new(
-            SqliteFileRepository::new("app.db").unwrap_or_else(|error| popup_error_and_exit(error)),
-        );
-        let translation_loader = Arc::new(JsonTranslationLoader);
-        let directory_picker = Arc::new(NativeDirectoryPicker);
+    pub fn new(service: ListerAppService) -> (Self, Task<AppMessage>) {
+        let (current_language, translations) = service.translations();
 
-        let query_service = Arc::new(FileQueryService::new(repository.clone()));
-        let indexing_service = Arc::new(FileIndexingService::new(repository.clone()));
-        let language_service =
-            Arc::new(LanguageService::new(repository.clone(), translation_loader));
-
-        let current_language = language_service
-            .get_current_language()
-            .unwrap_or_else(|_| Language::english());
-        let translations = language_service
-            .load_translations(&current_language)
-            .unwrap_or_default();
-
-        let (read_page, task) = ReadPage::new(query_service.clone());
+        let (read_page, task) = ReadPage::new(service.query_use_case.clone());
 
         (
             Self {
-                query_use_case: query_service,
-                indexing_use_case: indexing_service,
-                language_use_case: language_service,
-                directory_picker,
+                service,
                 current_language,
                 translations,
                 current_page: Page::Read(read_page),
@@ -113,7 +80,7 @@ impl ListerApp {
             }
             AppMessage::GoToRead => {
                 if matches!(self.current_page, Page::Write(_)) {
-                    let (read_page, task) = ReadPage::new(self.query_use_case.clone());
+                    let (read_page, task) = ReadPage::new(self.service.query_use_case.clone());
                     self.current_page = Page::Read(read_page);
                     task.map(AppMessage::Read)
                 } else {
@@ -123,8 +90,8 @@ impl ListerApp {
             AppMessage::GoToWrite => {
                 if matches!(self.current_page, Page::Read(_)) {
                     let (write_page, task) = WritePage::new(
-                        self.indexing_use_case.clone(),
-                        self.directory_picker.clone(),
+                        self.service.indexing_use_case.clone(),
+                        self.service.directory_picker.clone(),
                     );
                     self.current_page = Page::Write(write_page);
                     task.map(AppMessage::Write)
@@ -204,7 +171,7 @@ impl ListerApp {
                 })
                 .width(Length::Fill)
         ]
-            .spacing(10)
+        .spacing(10)
     }
 
     fn language_toggle(&'_ self) -> Row<'_, AppMessage> {
@@ -220,7 +187,7 @@ impl ListerApp {
     }
 
     fn change_language(&mut self, language: Language) -> Task<AppMessage> {
-        let language_use_case = self.language_use_case.clone();
+        let language_use_case = self.service.language_use_case.clone();
         Task::perform(
             async move {
                 language_use_case.set_language(language.clone()).ok();
