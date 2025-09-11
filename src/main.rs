@@ -2,8 +2,10 @@
 
 use lister::ui::app::ListerApp;
 use lister::ui::app_factory::ListerAppService;
+use lister::utils::self_update::self_update;
 
 fn main() -> iced::Result {
+    self_update();
     let service = ListerAppService::create();
     iced::application(ListerApp::title, ListerApp::update, ListerApp::view)
         .subscription(ListerApp::subscription)
