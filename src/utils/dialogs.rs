@@ -11,6 +11,15 @@ pub fn popup_error(error: impl Display) {
         .show();
 }
 
+pub fn popup_info(info: impl Display) {
+    MessageDialog::new()
+        .set_level(MessageLevel::Info)
+        .set_title("Info")
+        .set_description(info.to_string())
+        .set_buttons(MessageButtons::Ok)
+        .show();
+}
+
 pub fn popup_error_and_exit(error: impl Display) -> ! {
     popup_error(error);
     exit(1)
