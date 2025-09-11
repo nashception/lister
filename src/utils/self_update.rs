@@ -3,8 +3,6 @@ use self_update::backends::github::Update;
 use std::error::Error;
 
 pub fn self_update() {
-    println!("Current version: {}", env!("CARGO_PKG_VERSION"));
-
     match try_update() {
         Ok(new_version) => popup_info(format!("New version has been installed: {}", new_version)),
         Err(e) => popup_error(format!("Update failed: {}", e)),
