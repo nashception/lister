@@ -175,13 +175,13 @@ impl ReadPage {
                 } else {
                     query_use_case.search_files(&search_query, page, ipp).await
                 }
-                .unwrap_or_else(|err| {
-                    popup_error(err);
-                    PaginatedResult {
-                        items: vec![],
-                        total_count: 0,
-                    }
-                })
+                    .unwrap_or_else(|err| {
+                        popup_error(err);
+                        PaginatedResult {
+                            items: vec![],
+                            total_count: 0,
+                        }
+                    })
             },
             ReadMessage::FilesLoaded,
         )
@@ -302,13 +302,13 @@ impl ReadPage {
                 } else {
                     query_use_case.search_files(&search_query, 0, total).await
                 }
-                .unwrap_or_else(|error| {
-                    popup_error(error);
-                    PaginatedResult {
-                        items: vec![],
-                        total_count: 0,
-                    }
-                })
+                    .unwrap_or_else(|error| {
+                        popup_error(error);
+                        PaginatedResult {
+                            items: vec![],
+                            total_count: 0,
+                        }
+                    })
             },
             ReadMessage::FilesLoaded,
         )

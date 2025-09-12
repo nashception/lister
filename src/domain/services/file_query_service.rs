@@ -17,7 +17,6 @@ impl FileQueryService {
 
 #[async_trait::async_trait]
 impl FileQueryUseCase for FileQueryService {
-
     async fn get_search_count(&self, query: &str) -> Result<i64, DomainError> {
         let count = self.query_repo.count_search_results(query).await?;
         Ok(count)

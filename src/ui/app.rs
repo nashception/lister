@@ -171,7 +171,7 @@ impl ListerApp {
                 })
                 .width(Length::Fill)
         ]
-        .spacing(10)
+            .spacing(10)
     }
 
     fn language_toggle(&'_ self) -> Row<'_, AppMessage> {

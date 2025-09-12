@@ -125,8 +125,8 @@ impl WritePage {
             column![text(tr!(translations, "drive_label")).size(16), drive_input,].spacing(5),
             directory_section,
         ]
-        .spacing(15)
-        .into()
+            .spacing(15)
+            .into()
     }
 
     fn directory_section(
@@ -153,8 +153,8 @@ impl WritePage {
                 .spacing(10)
                 .align_y(Alignment::Center),
         ]
-        .spacing(5)
-        .into()
+            .spacing(5)
+            .into()
     }
 
     fn action_section(
@@ -204,8 +204,8 @@ impl WritePage {
                     .style(text::secondary)
                     .size(14),
             ]
-            .spacing(10)
-            .into(),
+                .spacing(10)
+                .into(),
             IndexingState::Scanning => column![
                 text(tr!(translations, "scan_status"))
                     .size(18)
@@ -214,8 +214,8 @@ impl WritePage {
                     .style(text::secondary)
                     .size(14),
             ]
-            .spacing(10)
-            .into(),
+                .spacing(10)
+                .into(),
             IndexingState::Saving => column![
                 text(tr!(translations, "save_status"))
                     .size(18)
@@ -224,8 +224,8 @@ impl WritePage {
                     .style(text::secondary)
                     .size(14),
             ]
-            .spacing(10)
-            .into(),
+                .spacing(10)
+                .into(),
             IndexingState::Completed { files_indexed } => column![
                 Rule::horizontal(1),
                 column![
@@ -244,8 +244,8 @@ impl WritePage {
                 ]
                 .spacing(10),
             ]
-            .spacing(15)
-            .into(),
+                .spacing(15)
+                .into(),
         }
     }
 
