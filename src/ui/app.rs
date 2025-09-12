@@ -50,10 +50,14 @@ impl ListerApp {
     }
 
     pub fn title(&self) -> String {
-        match &self.current_page {
-            Page::Read(page) => page.title(&self.translations),
-            Page::Write(page) => page.title(&self.translations),
-        }
+        format!(
+            "{} (v{})",
+            match &self.current_page {
+                Page::Read(page) => page.title(&self.translations),
+                Page::Write(page) => page.title(&self.translations),
+            },
+            env!("CARGO_PKG_VERSION")
+        )
     }
 
     pub fn view(&'_ self) -> Element<'_, AppMessage> {
@@ -171,7 +175,7 @@ impl ListerApp {
                 })
                 .width(Length::Fill)
         ]
-            .spacing(10)
+        .spacing(10)
     }
 
     fn language_toggle(&'_ self) -> Row<'_, AppMessage> {
