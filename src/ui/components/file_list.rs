@@ -34,8 +34,8 @@ impl FileList {
                     text(format_size(file.size_bytes as u64, DECIMAL))
                         .width(Length::FillPortion(1))
                 ]
-                .padding(3)
-                .into()
+                    .padding(3)
+                    .into()
             })
             .collect();
 
@@ -46,7 +46,7 @@ impl FileList {
                 .height(Length::Fill),
             Rule::horizontal(1),
         ]
-        .into()
+            .into()
     }
 
     pub fn snap_to_top(&self) -> iced::Task<ReadMessage> {

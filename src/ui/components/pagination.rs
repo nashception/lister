@@ -96,7 +96,7 @@ impl Pagination {
             total_pages,
             self.total_count
         ))
-        .size(14);
+            .size(14);
 
         let next_button = button(text(tr!(translations, "next_button")))
             .on_press_maybe(if self.current_page_index < total_pages.saturating_sub(1) {
@@ -118,10 +118,10 @@ impl Pagination {
             &tr!(translations, "page_placeholder"),
             &self.page_input_value,
         )
-        .on_input(ReadMessage::PageInputChanged)
-        .on_submit(ReadMessage::PageInputSubmit)
-        .padding(8)
-        .width(Length::Fixed(100f32));
+            .on_input(ReadMessage::PageInputChanged)
+            .on_submit(ReadMessage::PageInputSubmit)
+            .padding(8)
+            .width(Length::Fixed(100f32));
 
         row![
             first_button,
@@ -131,8 +131,8 @@ impl Pagination {
             last_button,
             page_input,
         ]
-        .spacing(20)
-        .align_y(Alignment::Center)
-        .into()
+            .spacing(20)
+            .align_y(Alignment::Center)
+            .into()
     }
 }
