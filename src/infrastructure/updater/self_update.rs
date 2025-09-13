@@ -1,18 +1,22 @@
-use std::env;
 use crate::utils::dialogs::{popup_error, popup_info};
 use self_update::backends::github::Update;
+use std::env;
 use std::error::Error;
 use std::process::{exit, Command};
 
 pub fn self_update() {
-    match try_update() {
-        Ok(message) => {
-            if !message.is_empty() {
-                popup_info(message);
-                restart()
+    let just_updated = env::args().any(|arg| arg == "--updated");
+
+    if !just_updated {
+        match try_update() {
+            Ok(message) => {
+                if !message.is_empty() {
+                    popup_info(message);
+                    restart()
+                }
             }
+            Err(e) => popup_error(format!("Update failed: {}", e)),
         }
-        Err(e) => popup_error(format!("Update failed: {}", e)),
     }
 }
 
@@ -36,10 +40,11 @@ fn try_update() -> Result<String, Box<dyn Error>> {
     Ok(message)
 }
 
-fn restart() -> ! {
+fn restart() {
     let exe_path = env::current_exe().expect("Failed to get current exe path");
 
     Command::new(exe_path)
+        .arg("--updated")
         .spawn()
         .expect("Failed to restart");
 
