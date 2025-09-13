@@ -15,7 +15,7 @@ async-trait = "0.1"
 tokio = { version = "1.47", features = ["rt-multi-thread"], default-features = false }
 
 # GUI
-iced = { version = "0.13", features = ["image", "wgpu"], default-features = false }
+iced = { version = "0.13", features = ["image", "wgpu", "auto-detect-theme"], default-features = false }
 
 # File system
 rfd = "0.15"
