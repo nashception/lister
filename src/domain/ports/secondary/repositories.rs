@@ -1,5 +1,5 @@
 use crate::domain::entities::category::Category;
-use crate::domain::entities::drive::Drive;
+use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::entities::language::Language;
 use crate::domain::entities::pagination::PaginatedResult;
@@ -25,7 +25,7 @@ pub trait FileCommandRepository: Send + Sync {
     async fn remove_duplicates(
         &self,
         category: Category,
-        drive: Drive,
+        drive: DriveToDelete,
     ) -> Result<(), RepositoryError>;
     async fn save(
         &self,

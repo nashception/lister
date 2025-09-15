@@ -10,6 +10,7 @@ pub struct FileEntry {
 pub struct FileWithMetadata {
     pub category_name: String,
     pub drive_name: String,
+    pub drive_available_space: i64,
     pub path: String,
     pub size_bytes: i64,
 }

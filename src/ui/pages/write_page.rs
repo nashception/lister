@@ -1,6 +1,7 @@
 use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
+use crate::infrastructure::filesystem::drive_space::available_space;
 use crate::tr;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
@@ -83,8 +84,8 @@ impl WritePage {
             }
             WriteMessage::WriteSubmit => self.clean_database(),
             WriteMessage::DatabaseCleaned => self.start_indexing(),
-            WriteMessage::ScanDirectoryFinished(scanned_files) => {
-                self.insert_in_database(scanned_files)
+            WriteMessage::ScanDirectoryFinished((directory, scanned_files)) => {
+                self.insert_in_database(directory, scanned_files)
             }
             WriteMessage::InsertInDatabaseFinished(count) => {
                 self.state = IndexingState::Completed {
@@ -125,8 +126,8 @@ impl WritePage {
             column![text(tr!(translations, "drive_label")).size(16), drive_input,].spacing(5),
             directory_section,
         ]
-            .spacing(15)
-            .into()
+        .spacing(15)
+        .into()
     }
 
     fn directory_section(
@@ -153,8 +154,8 @@ impl WritePage {
                 .spacing(10)
                 .align_y(Alignment::Center),
         ]
-            .spacing(5)
-            .into()
+        .spacing(5)
+        .into()
     }
 
     fn action_section(
@@ -204,8 +205,8 @@ impl WritePage {
                     .style(text::secondary)
                     .size(14),
             ]
-                .spacing(10)
-                .into(),
+            .spacing(10)
+            .into(),
             IndexingState::Scanning => column![
                 text(tr!(translations, "scan_status"))
                     .size(18)
@@ -214,8 +215,8 @@ impl WritePage {
                     .style(text::secondary)
                     .size(14),
             ]
-                .spacing(10)
-                .into(),
+            .spacing(10)
+            .into(),
             IndexingState::Saving => column![
                 text(tr!(translations, "save_status"))
                     .size(18)
@@ -224,8 +225,8 @@ impl WritePage {
                     .style(text::secondary)
                     .size(14),
             ]
-                .spacing(10)
-                .into(),
+            .spacing(10)
+            .into(),
             IndexingState::Completed { files_indexed } => column![
                 Rule::horizontal(1),
                 column![
@@ -244,8 +245,8 @@ impl WritePage {
                 ]
                 .spacing(10),
             ]
-                .spacing(15)
-                .into(),
+            .spacing(15)
+            .into(),
         }
     }
 
@@ -284,13 +285,14 @@ impl WritePage {
         if let Some(directory) = self.directory.clone() {
             Task::perform(
                 async move {
-                    indexing_use_case
-                        .scan_directory(directory)
+                    let files = indexing_use_case
+                        .scan_directory(&directory)
                         .await
                         .unwrap_or_else(|error| {
                             popup_error(error);
                             Vec::new()
-                        })
+                        });
+                    (directory, files)
                 },
                 WriteMessage::ScanDirectoryFinished,
             )
@@ -299,7 +301,11 @@ impl WritePage {
         }
     }
 
-    fn insert_in_database(&mut self, files: Vec<FileEntry>) -> Task<WriteMessage> {
+    fn insert_in_database(
+        &mut self,
+        directory: PathBuf,
+        files: Vec<FileEntry>,
+    ) -> Task<WriteMessage> {
         if self.state != IndexingState::Scanning {
             return Task::none();
         }
@@ -312,7 +318,7 @@ impl WritePage {
         Task::perform(
             async move {
                 indexing_use_case
-                    .insert_in_database(category, drive, files)
+                    .insert_in_database(category, drive, available_space(directory) as i64, files)
                     .await
                     .unwrap_or(0)
             },

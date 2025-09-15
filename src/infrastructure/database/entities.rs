@@ -15,6 +15,7 @@ struct DriveEntryEntity {
     id: i32,
     category_id: i32,
     name: String,
+    remaining_space: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Queryable, Identifiable, Associations)]
@@ -28,9 +29,16 @@ struct FileEntryEntity {
 }
 
 #[derive(Queryable)]
+pub struct DriveDto {
+    pub name: String,
+    pub available_space: i64,
+}
+
+#[derive(Queryable)]
 pub struct FileWithMetadataDto {
     pub category_name: String,
     pub drive_name: String,
+    pub drive_available_space: i64,
     pub path: String,
     pub weight: i64,
 }
@@ -46,6 +54,7 @@ pub struct NewFileCategoryDto {
 pub struct NewDriveEntryDto {
     pub category_id: i32,
     pub name: String,
+    pub available_space: i64,
 }
 
 #[derive(Insertable)]

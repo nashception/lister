@@ -9,7 +9,7 @@ pub enum WriteMessage {
     DirectoryChanged(Option<PathBuf>),
     DatabaseCleaned,
     WriteSubmit,
-    ScanDirectoryFinished(Vec<FileEntry>),
+    ScanDirectoryFinished((PathBuf, Vec<FileEntry>)),
     InsertInDatabaseFinished(usize),
     ResetForm,
 }

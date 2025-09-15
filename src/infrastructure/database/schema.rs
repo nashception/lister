@@ -12,6 +12,7 @@ table! {
         id -> Integer,
         category_id -> Integer,
         name -> Text,
+        available_space -> BigInt,
     }
 }
 

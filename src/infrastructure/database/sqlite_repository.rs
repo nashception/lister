@@ -1,6 +1,6 @@
 use crate::config::constants::{MIGRATIONS, TOKIO_RUNTIME};
 use crate::domain::entities::category::Category;
-use crate::domain::entities::drive::Drive;
+use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::{FileEntry, FileWithMetadata};
 use crate::domain::entities::language::Language;
 use crate::domain::entities::pagination::PaginatedResult;
@@ -9,7 +9,7 @@ use crate::domain::ports::secondary::repositories::{
     FileCommandRepository, FileQueryRepository, LanguageRepository,
 };
 use crate::infrastructure::database::entities::{
-    FileWithMetadataDto, NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
+    DriveDto, FileWithMetadataDto, NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
 };
 use crate::infrastructure::database::schema::drive_entries::dsl;
 use crate::infrastructure::database::schema::{
@@ -72,14 +72,15 @@ impl SqliteFileRepository {
     }
 
     fn save_drive(
-        drive_name: String,
+        drive: Drive,
         category_id: i32,
         conn: &mut SqliteConnection,
     ) -> Result<i32, RepositoryError> {
         let drive_id = diesel::insert_into(drive_entries::table)
             .values(NewDriveEntryDto {
                 category_id,
-                name: drive_name,
+                name: drive.name,
+                available_space: drive.available_space,
             })
             .returning(drive_entries::id)
             .get_result(conn)?;
@@ -136,8 +137,7 @@ impl SqliteFileRepository {
             .into_boxed();
 
         if let Some(drive) = selected_drive {
-            query = query
-                .filter(drive_entries::name.eq(&drive.name));
+            query = query.filter(drive_entries::name.eq(&drive.name));
         }
 
         if let Some(pattern) = search_pattern {
@@ -149,7 +149,9 @@ impl SqliteFileRepository {
     }
 
     fn search_pattern(query: &Option<String>) -> Option<String> {
-        let search_pattern = query.clone().map(|dto| format!("%{}%", dto).replace(" ", "_"));
+        let search_pattern = query
+            .clone()
+            .map(|dto| format!("%{}%", dto).replace(" ", "_"));
         search_pattern
     }
 }
@@ -164,11 +166,17 @@ impl FileQueryRepository for SqliteFileRepository {
                 let mut conn = pool.get()?;
 
                 let drives = dsl::drive_entries
-                    .select(drive_entries::name)
+                    .select((drive_entries::name, drive_entries::available_space))
                     .order(drive_entries::name)
-                    .load::<String>(&mut conn)?;
+                    .load::<DriveDto>(&mut conn)?;
 
-                Ok(drives.into_iter().map(|name| Drive { name }).collect())
+                Ok(drives
+                    .into_iter()
+                    .map(|drive| Drive {
+                        name: drive.name,
+                        available_space: drive.available_space,
+                    })
+                    .collect())
             })
             .await?
     }
@@ -195,6 +203,7 @@ impl FileQueryRepository for SqliteFileRepository {
                     .select((
                         file_categories::name,
                         drive_entries::name,
+                        drive_entries::available_space,
                         file_entries::path,
                         file_entries::weight,
                     ))
@@ -220,6 +229,7 @@ impl FileQueryRepository for SqliteFileRepository {
                     .map(|dto| FileWithMetadata {
                         category_name: dto.category_name,
                         drive_name: dto.drive_name,
+                        drive_available_space: dto.drive_available_space,
                         path: dto.path,
                         size_bytes: dto.weight,
                     })
@@ -254,7 +264,7 @@ impl FileCommandRepository for SqliteFileRepository {
     async fn remove_duplicates(
         &self,
         category: Category,
-        drive: Drive,
+        drive: DriveToDelete,
     ) -> Result<(), RepositoryError> {
         let pool = self.pool.clone();
 
@@ -277,7 +287,6 @@ impl FileCommandRepository for SqliteFileRepository {
     ) -> Result<usize, RepositoryError> {
         let pool = self.pool.clone();
         let category_name = category.name;
-        let drive_name = drive.name;
 
         TOKIO_RUNTIME
             .handle()
@@ -286,7 +295,7 @@ impl FileCommandRepository for SqliteFileRepository {
                 conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
                     let category_id = Self::save_category(category_name, conn)?;
 
-                    let drive_id = Self::save_drive(drive_name, category_id, conn)?;
+                    let drive_id = Self::save_drive(drive, category_id, conn)?;
 
                     Self::save_files(files, drive_id, conn)
                 })

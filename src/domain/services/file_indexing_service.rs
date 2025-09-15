@@ -1,10 +1,10 @@
 use crate::domain::entities::category::Category;
-use crate::domain::entities::drive::Drive;
+use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::errors::domain_error::DomainError;
 use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use crate::domain::ports::secondary::repositories::FileCommandRepository;
-use crate::domain::services::directory_scanner::DirectoryScanner;
+use crate::domain::services::directory_scanner;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -23,14 +23,13 @@ impl FileIndexingUseCase for FileIndexingService {
     async fn remove_duplicates(&self, category: String, drive: String) -> Result<(), DomainError> {
         let files_count = self
             .command_repo
-            .remove_duplicates(Category { name: category }, Drive { name: drive })
+            .remove_duplicates(Category { name: category }, DriveToDelete { name: drive })
             .await?;
         Ok(files_count)
     }
 
-    async fn scan_directory(&self, directory: PathBuf) -> Result<Vec<FileEntry>, DomainError> {
-        let scanner = DirectoryScanner::new(directory);
-        let files = scanner.scan_directory().await?;
+    async fn scan_directory(&self, directory: &PathBuf) -> Result<Vec<FileEntry>, DomainError> {
+        let files = directory_scanner::scan_directory(directory).await?;
         Ok(files)
     }
 
@@ -38,11 +37,19 @@ impl FileIndexingUseCase for FileIndexingService {
         &self,
         category: String,
         drive: String,
+        drive_available_space: i64,
         files: Vec<FileEntry>,
     ) -> Result<usize, DomainError> {
         let files_count = self
             .command_repo
-            .save(Category { name: category }, Drive { name: drive }, files)
+            .save(
+                Category { name: category },
+                Drive {
+                    name: drive,
+                    available_space: drive_available_space,
+                },
+                files,
+            )
             .await?;
         Ok(files_count)
     }
