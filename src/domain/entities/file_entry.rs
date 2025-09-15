@@ -1,4 +1,5 @@
 use std::path::Path;
+use chrono::NaiveDateTime;
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -11,6 +12,7 @@ pub struct FileWithMetadata {
     pub category_name: String,
     pub drive_name: String,
     pub drive_available_space: i64,
+    pub drive_insertion_time: NaiveDateTime,
     pub path: String,
     pub size_bytes: i64,
 }

@@ -1,3 +1,4 @@
+use chrono::NaiveDateTime;
 use crate::infrastructure::database::schema::{drive_entries, file_categories, file_entries};
 use diesel::{Associations, Identifiable, Insertable, Queryable};
 
@@ -16,6 +17,7 @@ struct DriveEntryEntity {
     category_id: i32,
     name: String,
     remaining_space: i64,
+    insertion_time: NaiveDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Queryable, Identifiable, Associations)]
@@ -33,6 +35,7 @@ pub struct FileWithMetadataDto {
     pub category_name: String,
     pub drive_name: String,
     pub drive_available_space: i64,
+    pub drive_insertion_time: NaiveDateTime,
     pub path: String,
     pub weight: i64,
 }
@@ -49,6 +52,7 @@ pub struct NewDriveEntryDto {
     pub category_id: i32,
     pub name: String,
     pub available_space: i64,
+    pub insertion_time: NaiveDateTime,
 }
 
 #[derive(Insertable)]

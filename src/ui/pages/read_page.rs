@@ -17,6 +17,7 @@ use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::widget::{column, row};
 use iced::{keyboard, Element, Subscription, Task};
+use crate::domain::entities::language::Language;
 
 pub struct ReadPage {
     query_use_case: Arc<dyn FileQueryUseCase>,
@@ -48,10 +49,10 @@ impl ReadPage {
         tr!(translations, "read_page_title")
     }
 
-    pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
+    pub fn view(&'_ self, translations: &HashMap<String, String>, language: &Language) -> Element<'_, ReadMessage> {
         let drive_combo_box = self.drive_combo_box.view(translations);
         let search_section = self.search.view(translations);
-        let files = self.file_list.view();
+        let files = self.file_list.view(language);
         let pagination_section = self.pagination.view(translations);
 
         column![

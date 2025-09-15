@@ -1,37 +1,37 @@
 #[derive(Clone, Debug, PartialEq)]
-pub struct Language {
-    code: String,
+pub enum Language {
+    English,
+    French,
 }
 
 impl Language {
     pub fn new(code: &str) -> Self {
-        let normalized_code = match code.to_lowercase().as_str() {
-            "en" | "english" => "en",
-            "fr" | "french" => "fr",
-            _ => "en",
-        };
-        Self {
-            code: normalized_code.to_string(),
+        match code.to_lowercase().as_str() {
+            "en" | "english" => Language::English,
+            "fr" | "french" => Language::French,
+            _ => Language::English,
         }
     }
 
     pub fn english() -> Self {
-        Self::new("en")
+        Language::English
     }
 
     pub fn french() -> Self {
-        Self::new("fr")
+        Language::French
     }
 
     pub fn code(&self) -> &str {
-        &self.code
+        match self {
+            Language::English => "en",
+            Language::French => "fr",
+        }
     }
 
     pub fn toggle(&self) -> Self {
-        match self.code.as_str() {
-            "en" => Self::french(),
-            "fr" => Self::english(),
-            _ => Self::english(),
+        match self {
+            Language::English => Language::French,
+            Language::French => Language::English,
         }
     }
 }

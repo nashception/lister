@@ -14,6 +14,7 @@ use crate::infrastructure::database::entities::{
 use crate::infrastructure::database::schema::{
     drive_entries, file_categories, file_entries, settings,
 };
+use chrono::Local;
 use diesel::dsl::{exists, update};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
@@ -99,6 +100,7 @@ impl SqliteFileRepository {
                 category_id,
                 name: drive.name.clone(),
                 available_space: drive.available_space,
+                insertion_time: Local::now().naive_local(),
             })
             .returning(drive_entries::id)
             .get_result(conn)?;
@@ -211,6 +213,7 @@ impl FileQueryRepository for SqliteFileRepository {
                         file_categories::name,
                         drive_entries::name,
                         drive_entries::available_space,
+                        drive_entries::insertion_time,
                         file_entries::path,
                         file_entries::weight,
                     ))
@@ -237,6 +240,7 @@ impl FileQueryRepository for SqliteFileRepository {
                         category_name: dto.category_name,
                         drive_name: dto.drive_name,
                         drive_available_space: dto.drive_available_space,
+                        drive_insertion_time: dto.drive_insertion_time,
                         path: dto.path,
                         size_bytes: dto.weight,
                     })

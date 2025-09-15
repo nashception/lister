@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 
 # Database
-diesel = { version = "2.2", features = ["r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"], default-features = false }
+diesel = { version = "2.2", features = ["chrono", "r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"], default-features = false }
 diesel_migrations = {version = "2.2", default-features = false}
 
 # Async
@@ -23,6 +23,7 @@ sysinfo = { version = "0.37", features = ["disk"], default-features = false }
 walkdir = "2.5"
 
 # Utilities
+chrono = { version = "0.4", default-features = false}
 humansize = { version = "2.1", default-features = false }
 serde_json = { version = "1.0", default-features = false }
 thiserror = { version = "2.0", default-features = false }
