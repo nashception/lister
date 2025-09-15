@@ -22,6 +22,7 @@ pub trait FileQueryUseCase: Send + Sync {
 
     async fn list_files(
         &self,
+        selected_drive: &Option<Drive>,
         page: usize,
         page_size: usize,
     ) -> Result<PaginatedResult, DomainError>;

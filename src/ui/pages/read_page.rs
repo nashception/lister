@@ -190,7 +190,7 @@ impl ReadPage {
                 }
 
                 if search_query.is_empty() {
-                    query_use_case.list_files(page, ipp).await
+                    query_use_case.list_files(&selected_drive, page, ipp).await
                 } else {
                     query_use_case.search_files(&selected_drive, &search_query, page, ipp).await
                 }
@@ -320,7 +320,7 @@ impl ReadPage {
         Task::perform(
             async move {
                 if search_query.is_empty() {
-                    query_use_case.list_files(0, total).await
+                    query_use_case.list_files(&selected_drive, 0, total).await
                 } else {
                     query_use_case.search_files(&selected_drive, &search_query, 0, total).await
                 }

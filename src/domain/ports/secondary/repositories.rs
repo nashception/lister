@@ -11,6 +11,7 @@ pub trait FileQueryRepository: Send + Sync {
 
     async fn find_files_paginated(
         &self,
+        selected_drive: &Option<Drive>,
         offset: i64,
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError>;

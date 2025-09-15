@@ -11,6 +11,7 @@ use crate::domain::ports::secondary::repositories::{
 use crate::infrastructure::database::entities::{
     FileWithMetadataDto, NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
 };
+use crate::infrastructure::database::schema::drive_entries::dsl;
 use crate::infrastructure::database::schema::{
     drive_entries, file_categories, file_entries, settings,
 };
@@ -19,7 +20,6 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, TextExpressionMethods};
 use diesel_migrations::MigrationHarness;
-use crate::infrastructure::database::schema::drive_entries::dsl;
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 type DieselConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
@@ -148,18 +148,20 @@ impl FileQueryRepository for SqliteFileRepository {
 
     async fn find_files_paginated(
         &self,
+        selected_drive: &Option<Drive>,
         offset: i64,
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError> {
         let pool = self.pool.clone();
+        let selected_drive = selected_drive.clone();
         TOKIO_RUNTIME
             .handle()
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
 
-                let total_count: i64 = file_entries::table.count().get_result(&mut conn)?;
+                let total_count: i64 = count(&selected_drive, &None, &mut conn)?;
 
-                let entities = file_entries::table
+                let mut query = file_entries::table
                     .inner_join(drive_entries::table.inner_join(file_categories::table))
                     .select((
                         file_categories::name,
@@ -169,7 +171,13 @@ impl FileQueryRepository for SqliteFileRepository {
                     ))
                     .limit(limit)
                     .offset(offset)
-                    .load::<FileWithMetadataDto>(&mut conn)?;
+                    .into_boxed();
+
+                if let Some(drive) = selected_drive {
+                    query = query.filter(drive_entries::name.eq(drive.name));
+                }
+
+                let entities = query.load::<FileWithMetadataDto>(&mut conn)?;
 
                 let items = entities
                     .into_iter()
@@ -201,7 +209,7 @@ impl FileQueryRepository for SqliteFileRepository {
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
 
-                let total_count = count(&selected_drive, &search_pattern, &mut conn)?;
+                let total_count = count(&selected_drive, &Some(search_pattern.clone()), &mut conn)?;
 
                 let mut query = file_entries::table
                     .inner_join(drive_entries::table.inner_join(file_categories::table))
@@ -243,7 +251,11 @@ impl FileQueryRepository for SqliteFileRepository {
             .await?
     }
 
-    async fn count_search_results(&self, selected_drive: &Option<Drive>, query: &str) -> Result<i64, RepositoryError> {
+    async fn count_search_results(
+        &self,
+        selected_drive: &Option<Drive>,
+        query: &str,
+    ) -> Result<i64, RepositoryError> {
         let pool = self.pool.clone();
         let selected_drive = selected_drive.clone();
         let search_pattern = format!("%{}%", query.replace(" ", "_"));
@@ -251,27 +263,32 @@ impl FileQueryRepository for SqliteFileRepository {
             .handle()
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
-                let count = count(&selected_drive, &search_pattern, &mut conn)?;
+                let count = count(&selected_drive, &Some(search_pattern), &mut conn)?;
                 Ok(count)
             })
             .await?
     }
 }
 
-fn count(selected_drive: &Option<Drive>, search_pattern: &String, conn: &mut DieselConnection) -> Result<i64, RepositoryError> {
-    let count = if let Some(drive) = selected_drive {
-        file_entries::table
-            .inner_join(drive_entries::table)
-            .filter(drive_entries::name.eq(&drive.name))
-            .filter(file_entries::path.like(&search_pattern))
-            .count()
-            .get_result(conn)?
-    } else {
-        file_entries::table
-            .filter(file_entries::path.like(&search_pattern))
-            .count()
-            .get_result(conn)?
-    };
+fn count(
+    selected_drive: &Option<Drive>,
+    search_pattern: &Option<String>,
+    conn: &mut DieselConnection,
+) -> Result<i64, RepositoryError> {
+    let mut query = file_entries::table
+        .inner_join(drive_entries::table)
+        .into_boxed();
+
+    if let Some(drive) = selected_drive {
+        query = query
+            .filter(drive_entries::name.eq(&drive.name));
+    }
+
+    if let Some(pattern) = search_pattern {
+        query = query.filter(file_entries::path.like(pattern));
+    }
+
+    let count: i64 = query.count().get_result(conn)?;
     Ok(count)
 }
 
