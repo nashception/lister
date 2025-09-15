@@ -1,6 +1,8 @@
+use crate::domain::entities::drive::Drive;
 use crate::domain::entities::file_entry::FileWithMetadata;
 
 pub struct Cache {
+    pub drive: Option<Drive>,
     pub query: Option<String>,
     pub results: Option<Vec<FileWithMetadata>>,
 }
@@ -8,32 +10,36 @@ pub struct Cache {
 impl Cache {
     pub fn new() -> Self {
         Self {
+            drive: None,
             query: None,
             results: None,
         }
     }
 
     pub fn clear(&mut self) {
+        self.drive = None;
         self.query = None;
         self.results = None;
     }
 
-    pub fn store(&mut self, query: String, results: Vec<FileWithMetadata>) {
+    pub fn store(&mut self, drive: Option<Drive>, query: String, results: Vec<FileWithMetadata>) {
+        self.drive = drive;
         self.query = Some(query);
         self.results = Some(results);
     }
 
-    pub fn is_valid_for(&self, query: &str) -> bool {
-        self.query.as_deref() == Some(query)
+    pub fn is_valid_for(&self, selected_drive: &Option<Drive>, query: &str) -> bool {
+        &self.drive == selected_drive && self.query.as_deref() == Some(query)
     }
 
     pub fn get_page(
         &self,
+        selected_drive: &Option<Drive>,
         query: &str,
         page_index: usize,
         items_per_page: usize,
     ) -> Option<Vec<FileWithMetadata>> {
-        if self.is_valid_for(query) {
+        if self.is_valid_for(selected_drive, query) {
             if let Some(results) = &self.results {
                 let start = page_index * items_per_page;
                 if start < results.len() {

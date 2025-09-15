@@ -149,6 +149,7 @@ impl ReadPage {
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {
         if let Some(files) = self.cache.get_page(
+            &self.drive_combo_box.selected_drive,
             &self.search.query,
             self.pagination.current_page_index,
             ITEMS_PER_PAGE,
@@ -157,7 +158,7 @@ impl ReadPage {
             return self.file_list.snap_to_top();
         }
 
-        if !self.cache.is_valid_for(&self.search.query) {
+        if !self.cache.is_valid_for(&self.drive_combo_box.selected_drive, &self.search.query) {
             self.cache.clear();
         }
 
@@ -288,9 +289,10 @@ impl ReadPage {
     fn store_full_and_show_page(&mut self, full_items: Vec<FileWithMetadata>) -> Task<ReadMessage> {
         // store full dataset in cache
         self.cache
-            .store(self.search.query.clone(), full_items.clone());
+            .store(self.drive_combo_box.selected_drive.clone(), self.search.query.clone(), full_items.clone());
 
         if let Some(page_files) = self.cache.get_page(
+            &self.drive_combo_box.selected_drive,
             &self.search.query,
             self.pagination.current_page_index,
             ITEMS_PER_PAGE,
