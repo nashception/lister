@@ -8,17 +8,19 @@ use crate::domain::entities::pagination::PaginatedResult;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
 use crate::ui::components::cache::Cache;
+use crate::ui::components::drive_combo_box::DriveComboBox;
 use crate::ui::components::file_list::FileList;
 use crate::ui::components::pagination::Pagination;
 use crate::ui::components::search::Search;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
-use iced::widget::column;
+use iced::widget::{column, row};
 use iced::{keyboard, Element, Subscription, Task};
 
 pub struct ReadPage {
     query_use_case: Arc<dyn FileQueryUseCase>,
+    drive_combo_box: DriveComboBox,
     search: Search,
     pagination: Pagination,
     file_list: FileList,
@@ -28,9 +30,11 @@ pub struct ReadPage {
 
 impl ReadPage {
     pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
+        let (drive_combo_box, combo_box_task) = DriveComboBox::new(query_use_case.clone());
         let (search, search_task) = Search::new();
         let mut page = Self {
             query_use_case,
+            drive_combo_box,
             search,
             pagination: Pagination::new(ITEMS_PER_PAGE),
             file_list: FileList::new(),
@@ -38,7 +42,7 @@ impl ReadPage {
             is_cache_warming: false,
         };
         let task = page.load_current_page();
-        (page, search_task.chain(task))
+        (page, Task::batch([combo_box_task, search_task, task]))
     }
 
     pub fn title(&self, translations: &HashMap<String, String>) -> String {
@@ -46,14 +50,19 @@ impl ReadPage {
     }
 
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
+        let drive_combo_box = self.drive_combo_box.view();
         let search_section = self.search.view(translations);
         let files = self.file_list.view();
         let pagination_section = self.pagination.view(translations);
 
-        column![search_section, files, pagination_section]
-            .spacing(20)
-            .padding(20)
-            .into()
+        column![
+            row![drive_combo_box, search_section].spacing(10),
+            files,
+            pagination_section
+        ]
+        .spacing(20)
+        .padding(20)
+        .into()
     }
 
     pub fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
@@ -63,6 +72,14 @@ impl ReadPage {
             ReadMessage::FirstPage => self.navigate_to_page(0),
             ReadMessage::LastPage => {
                 self.navigate_to_page(self.pagination.total_pages().saturating_sub(1))
+            }
+            ReadMessage::DrivesFetched(drives) => {
+                self.drive_combo_box.drives = drives;
+                Task::none()
+            }
+            ReadMessage::DriveSelected(drive) => {
+                self.drive_combo_box.selected_drive = Some(drive);
+                Task::none()
             }
             ReadMessage::SearchSubmit => self.process_new_search(),
             ReadMessage::SearchClear => self.clear_search(),
@@ -175,13 +192,13 @@ impl ReadPage {
                 } else {
                     query_use_case.search_files(&search_query, page, ipp).await
                 }
-                    .unwrap_or_else(|err| {
-                        popup_error(err);
-                        PaginatedResult {
-                            items: vec![],
-                            total_count: 0,
-                        }
-                    })
+                .unwrap_or_else(|err| {
+                    popup_error(err);
+                    PaginatedResult {
+                        items: vec![],
+                        total_count: 0,
+                    }
+                })
             },
             ReadMessage::FilesLoaded,
         )
@@ -217,6 +234,7 @@ impl ReadPage {
     }
 
     fn clear_search(&mut self) -> Task<ReadMessage> {
+        self.drive_combo_box.selected_drive = None;
         self.search.clear();
         self.process_new_search()
     }
@@ -302,13 +320,13 @@ impl ReadPage {
                 } else {
                     query_use_case.search_files(&search_query, 0, total).await
                 }
-                    .unwrap_or_else(|error| {
-                        popup_error(error);
-                        PaginatedResult {
-                            items: vec![],
-                            total_count: 0,
-                        }
-                    })
+                .unwrap_or_else(|error| {
+                    popup_error(error);
+                    PaginatedResult {
+                        items: vec![],
+                        total_count: 0,
+                    }
+                })
             },
             ReadMessage::FilesLoaded,
         )

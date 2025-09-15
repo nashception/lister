@@ -19,6 +19,7 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, TextExpressionMethods};
 use diesel_migrations::MigrationHarness;
+use crate::infrastructure::database::schema::drive_entries::dsl;
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 
@@ -119,7 +120,7 @@ impl SqliteFileRepository {
                     .filter(drive_entries::name.eq(drive_name)),
             )),
         )
-            .execute(conn)?;
+        .execute(conn)?;
 
         Ok(())
     }
@@ -127,6 +128,23 @@ impl SqliteFileRepository {
 
 #[async_trait::async_trait]
 impl FileQueryRepository for SqliteFileRepository {
+    async fn find_all_drives(&self) -> Result<Vec<Drive>, RepositoryError> {
+        let pool = self.pool.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+
+                let drives = dsl::drive_entries
+                    .select(drive_entries::name)
+                    .order(drive_entries::name)
+                    .load::<String>(&mut conn)?;
+
+                Ok(drives.into_iter().map(|name| Drive { name }).collect())
+            })
+            .await?
+    }
+
     async fn find_files_paginated(
         &self,
         offset: i64,
@@ -276,7 +294,6 @@ impl FileCommandRepository for SqliteFileRepository {
     }
 }
 
-// Implement language repository interface
 impl LanguageRepository for SqliteFileRepository {
     fn get_language(&self) -> Result<Language, RepositoryError> {
         let mut conn = self.pool.get()?;

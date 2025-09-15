@@ -1,0 +1,42 @@
+use crate::domain::entities::drive::Drive;
+use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
+use crate::ui::messages::read_message::ReadMessage;
+use crate::utils::dialogs::popup_error;
+use iced::widget::pick_list;
+use iced::{Element, Task};
+use std::sync::Arc;
+
+pub struct DriveComboBox {
+    pub drives: Vec<Drive>,
+    pub selected_drive: Option<Drive>,
+}
+
+impl DriveComboBox {
+    pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
+        (
+            Self {
+                drives: vec![],
+                selected_drive: None,
+            },
+            Task::perform(
+                async move {
+                    query_use_case.list_drives().await.unwrap_or_else(|err| {
+                        popup_error(err);
+                        vec![]
+                    })
+                },
+                ReadMessage::DrivesFetched,
+            ),
+        )
+    }
+
+    pub fn view(&'_ self) -> Element<'_, ReadMessage> {
+        pick_list(
+            self.drives.clone(),
+            self.selected_drive.clone(),
+            ReadMessage::DriveSelected,
+        )
+        .placeholder("Select Drive")
+        .into()
+    }
+}

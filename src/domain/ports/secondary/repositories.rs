@@ -7,6 +7,8 @@ use crate::domain::errors::repository_error::RepositoryError;
 
 #[async_trait::async_trait]
 pub trait FileQueryRepository: Send + Sync {
+    async fn find_all_drives(&self) -> Result<Vec<Drive>, RepositoryError>;
+
     async fn find_files_paginated(
         &self,
         offset: i64,

@@ -1,3 +1,4 @@
+use crate::domain::entities::drive::Drive;
 use crate::domain::entities::pagination::PaginatedResult;
 
 #[derive(Clone, Debug)]
@@ -8,6 +9,8 @@ pub enum ReadMessage {
     PageInputSubmit,
     NextPage,
     LastPage,
+    DrivesFetched(Vec<Drive>),
+    DriveSelected(Drive),
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
