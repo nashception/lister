@@ -78,7 +78,7 @@ impl ReadPage {
             }
             ReadMessage::DriveSelected(drive) => {
                 self.drive_combo_box.selected_drive = Some(drive);
-                Task::none()
+                self.process_new_search()
             }
             ReadMessage::SearchSubmit => self.process_new_search(),
             ReadMessage::SearchClear => self.clear_search(),
