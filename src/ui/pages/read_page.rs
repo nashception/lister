@@ -32,7 +32,7 @@ impl ReadPage {
     pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
         let (drive_combo_box, combo_box_task) = DriveComboBox::new(query_use_case.clone());
         let (search, search_task) = Search::new();
-        let mut page = Self {
+        let page = Self {
             query_use_case,
             drive_combo_box,
             search,
@@ -41,8 +41,7 @@ impl ReadPage {
             cache: Cache::new(),
             is_cache_warming: false,
         };
-        let task = page.load_current_page();
-        (page, Task::batch([combo_box_task, search_task, task]))
+        (page, Task::batch([combo_box_task, search_task]))
     }
 
     pub fn title(&self, translations: &HashMap<String, String>) -> String {
@@ -241,7 +240,10 @@ impl ReadPage {
     fn clear_search(&mut self) -> Task<ReadMessage> {
         self.drive_combo_box.selected_drive = None;
         self.search.clear();
-        self.process_new_search()
+        self.cache.clear();
+        self.file_list.clear();
+        self.pagination.clear();
+        Task::none()
     }
 
     fn process_page_input(&mut self) -> Task<ReadMessage> {

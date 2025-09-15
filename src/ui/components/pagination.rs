@@ -71,6 +71,11 @@ impl Pagination {
         self.page_input_value.clear();
     }
 
+    pub fn clear(&mut self) {
+        self.total_count = 0;
+        self.reset();
+    }
+
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
         let total_pages = self.total_pages();
 

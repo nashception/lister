@@ -21,6 +21,10 @@ impl FileList {
         self.files = files;
     }
 
+    pub fn clear(&mut self) {
+        self.files.clear();
+    }
+
     pub fn view<'a>(&'a self) -> Element<'a, ReadMessage> {
         let file_rows: Vec<Element<'a, ReadMessage>> = self
             .files
