@@ -9,7 +9,7 @@ use crate::domain::ports::secondary::repositories::{
     FileCommandRepository, FileQueryRepository, LanguageRepository,
 };
 use crate::infrastructure::database::entities::{
-    DriveDto, FileWithMetadataDto, NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
+    FileWithMetadataDto, NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
 };
 use crate::infrastructure::database::schema::drive_entries::dsl;
 use crate::infrastructure::database::schema::{
@@ -128,7 +128,7 @@ impl SqliteFileRepository {
     }
 
     fn count(
-        selected_drive: &Option<Drive>,
+        selected_drive: &Option<String>,
         search_pattern: &Option<String>,
         conn: &mut DieselConnection,
     ) -> Result<i64, RepositoryError> {
@@ -137,7 +137,7 @@ impl SqliteFileRepository {
             .into_boxed();
 
         if let Some(drive) = selected_drive {
-            query = query.filter(drive_entries::name.eq(&drive.name));
+            query = query.filter(drive_entries::name.eq(drive));
         }
 
         if let Some(pattern) = search_pattern {
@@ -158,7 +158,7 @@ impl SqliteFileRepository {
 
 #[async_trait::async_trait]
 impl FileQueryRepository for SqliteFileRepository {
-    async fn find_all_drives(&self) -> Result<Vec<Drive>, RepositoryError> {
+    async fn find_all_drive_names(&self) -> Result<Vec<String>, RepositoryError> {
         let pool = self.pool.clone();
         TOKIO_RUNTIME
             .handle()
@@ -166,24 +166,19 @@ impl FileQueryRepository for SqliteFileRepository {
                 let mut conn = pool.get()?;
 
                 let drives = dsl::drive_entries
-                    .select((drive_entries::name, drive_entries::available_space))
+                    .select(drive_entries::name)
+                    .distinct()
                     .order(drive_entries::name)
-                    .load::<DriveDto>(&mut conn)?;
+                    .load::<String>(&mut conn)?;
 
-                Ok(drives
-                    .into_iter()
-                    .map(|drive| Drive {
-                        name: drive.name,
-                        available_space: drive.available_space,
-                    })
-                    .collect())
+                Ok(drives)
             })
             .await?
     }
 
     async fn search_files_paginated(
         &self,
-        selected_drive: &Option<Drive>,
+        selected_drive: &Option<String>,
         query: &Option<String>,
         offset: i64,
         limit: i64,
@@ -211,7 +206,7 @@ impl FileQueryRepository for SqliteFileRepository {
 
                 // Conditionally add drive filter
                 if let Some(drive) = &selected_drive {
-                    query = query.filter(drive_entries::name.eq(&drive.name));
+                    query = query.filter(drive_entries::name.eq(drive));
                 }
 
                 // Apply search pattern filter
@@ -242,7 +237,7 @@ impl FileQueryRepository for SqliteFileRepository {
 
     async fn count_search_results(
         &self,
-        selected_drive: &Option<Drive>,
+        selected_drive: &Option<String>,
         query: &Option<String>,
     ) -> Result<i64, RepositoryError> {
         let pool = self.pool.clone();

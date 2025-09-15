@@ -1,4 +1,3 @@
-use crate::domain::entities::drive::Drive;
 use crate::domain::entities::pagination::PaginatedResult;
 
 #[derive(Clone, Debug)]
@@ -9,24 +8,16 @@ pub enum ReadMessage {
     PageInputSubmit,
     NextPage,
     LastPage,
-    DrivesFetched(Vec<Drive>),
-    DriveSelected(Drive),
+    DrivesFetched(Vec<String>),
+    DriveSelected(String),
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
     FilesLoaded(PaginatedResult),
-    ArrowLeftPressed {
-        shift: bool,
-    },
-    ArrowRightPressed {
-        shift: bool,
-    },
-    ArrowUpPressed {
-        shift: bool,
-    },
-    ArrowDownPressed {
-        shift: bool,
-    },
+    ArrowLeftPressed { shift: bool },
+    ArrowRightPressed { shift: bool },
+    ArrowUpPressed { shift: bool },
+    ArrowDownPressed { shift: bool },
     ArrowNavigationReleased,
     PageUpPressed,
     PageDownPressed,

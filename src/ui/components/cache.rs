@@ -1,8 +1,7 @@
-use crate::domain::entities::drive::Drive;
 use crate::domain::entities::file_entry::FileWithMetadata;
 
 pub struct Cache {
-    pub drive: Option<Drive>,
+    pub drive: Option<String>,
     pub query: Option<String>,
     pub results: Option<Vec<FileWithMetadata>>,
 }
@@ -22,19 +21,19 @@ impl Cache {
         self.results = None;
     }
 
-    pub fn store(&mut self, drive: Option<Drive>, query: String, results: Vec<FileWithMetadata>) {
+    pub fn store(&mut self, drive: Option<String>, query: String, results: Vec<FileWithMetadata>) {
         self.drive = drive;
         self.query = Some(query);
         self.results = Some(results);
     }
 
-    pub fn is_valid_for(&self, selected_drive: &Option<Drive>, query: &str) -> bool {
+    pub fn is_valid_for(&self, selected_drive: &Option<String>, query: &str) -> bool {
         &self.drive == selected_drive && self.query.as_deref() == Some(query)
     }
 
     pub fn get_page(
         &self,
-        selected_drive: &Option<Drive>,
+        selected_drive: &Option<String>,
         query: &str,
         page_index: usize,
         items_per_page: usize,

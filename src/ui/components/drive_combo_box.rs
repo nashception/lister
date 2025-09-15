@@ -1,4 +1,3 @@
-use crate::domain::entities::drive::Drive;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
 use crate::ui::messages::read_message::ReadMessage;
@@ -10,8 +9,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct DriveComboBox {
-    pub drives: Vec<Drive>,
-    pub selected_drive: Option<Drive>,
+    pub drives: Vec<String>,
+    pub selected_drive: Option<String>,
 }
 
 impl DriveComboBox {
@@ -23,10 +22,13 @@ impl DriveComboBox {
             },
             Task::perform(
                 async move {
-                    query_use_case.list_drives().await.unwrap_or_else(|err| {
-                        popup_error(err);
-                        vec![]
-                    })
+                    query_use_case
+                        .list_drive_names()
+                        .await
+                        .unwrap_or_else(|err| {
+                            popup_error(err);
+                            vec![]
+                        })
                 },
                 ReadMessage::DrivesFetched,
             ),

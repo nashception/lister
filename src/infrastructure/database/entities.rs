@@ -29,12 +29,6 @@ struct FileEntryEntity {
 }
 
 #[derive(Queryable)]
-pub struct DriveDto {
-    pub name: String,
-    pub available_space: i64,
-}
-
-#[derive(Queryable)]
 pub struct FileWithMetadataDto {
     pub category_name: String,
     pub drive_name: String,
