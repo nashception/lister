@@ -19,20 +19,25 @@ impl FileQueryService {
 #[async_trait::async_trait]
 impl FileQueryUseCase for FileQueryService {
     async fn list_drives(&self) -> Result<Vec<Drive>, DomainError> {
-        let drives = self
-            .query_repo
-            .find_all_drives()
-            .await?;
+        let drives = self.query_repo.find_all_drives().await?;
         Ok(drives)
     }
 
-    async fn get_search_count(&self, query: &str) -> Result<i64, DomainError> {
-        let count = self.query_repo.count_search_results(query).await?;
+    async fn get_search_count(
+        &self,
+        selected_drive: &Option<Drive>,
+        query: &str,
+    ) -> Result<i64, DomainError> {
+        let count = self
+            .query_repo
+            .count_search_results(selected_drive, query)
+            .await?;
         Ok(count)
     }
 
     async fn search_files(
         &self,
+        selected_drive: &Option<Drive>,
         query: &str,
         page: usize,
         page_size: usize,
@@ -41,10 +46,10 @@ impl FileQueryUseCase for FileQueryService {
         let limit = page_size as i64;
 
         // Optimize small result sets by caching
-        let count = self.query_repo.count_search_results(query).await?;
+        let count = self.query_repo.count_search_results(selected_drive, query).await?;
         if count <= CACHED_SIZE {
             self.query_repo
-                .search_files_paginated(query, 0, count)
+                .search_files_paginated(selected_drive, query, 0, count)
                 .await
                 .map(|mut result| {
                     let start = offset as usize;
@@ -59,7 +64,7 @@ impl FileQueryUseCase for FileQueryService {
                 .map_err(DomainError::Repository)
         } else {
             self.query_repo
-                .search_files_paginated(query, offset, limit)
+                .search_files_paginated(selected_drive, query, offset, limit)
                 .await
                 .map_err(DomainError::Repository)
         }

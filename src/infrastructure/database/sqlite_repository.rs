@@ -16,12 +16,13 @@ use crate::infrastructure::database::schema::{
 };
 use diesel::dsl::exists;
 use diesel::prelude::*;
-use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, TextExpressionMethods};
 use diesel_migrations::MigrationHarness;
 use crate::infrastructure::database::schema::drive_entries::dsl;
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
+type DieselConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
 
 pub struct SqliteFileRepository {
     pool: DieselPool,
@@ -187,21 +188,20 @@ impl FileQueryRepository for SqliteFileRepository {
 
     async fn search_files_paginated(
         &self,
+        selected_drive: &Option<Drive>,
         query: &str,
         offset: i64,
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError> {
         let pool = self.pool.clone();
+        let selected_drive = selected_drive.clone();
         let search_pattern = format!("%{}%", query.replace(" ", "_"));
         TOKIO_RUNTIME
             .handle()
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
 
-                let total_count: i64 = file_entries::table
-                    .filter(file_entries::path.like(&search_pattern))
-                    .count()
-                    .get_result(&mut conn)?;
+                let total_count = count(&selected_drive, &search_pattern, &mut conn)?;
 
                 let entities = file_entries::table
                     .inner_join(drive_entries::table.inner_join(file_categories::table))
@@ -231,21 +231,36 @@ impl FileQueryRepository for SqliteFileRepository {
             .await?
     }
 
-    async fn count_search_results(&self, query: &str) -> Result<i64, RepositoryError> {
+    async fn count_search_results(&self, selected_drive: &Option<Drive>, query: &str) -> Result<i64, RepositoryError> {
         let pool = self.pool.clone();
+        let selected_drive = selected_drive.clone();
         let search_pattern = format!("%{}%", query.replace(" ", "_"));
         TOKIO_RUNTIME
             .handle()
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
-                let count = file_entries::table
-                    .filter(file_entries::path.like(&search_pattern))
-                    .count()
-                    .get_result(&mut conn)?;
+                let count = count(&selected_drive, &search_pattern, &mut conn)?;
                 Ok(count)
             })
             .await?
     }
+}
+
+fn count(selected_drive: &Option<Drive>, search_pattern: &String, conn: &mut DieselConnection) -> Result<i64, RepositoryError> {
+    let count = if let Some(drive) = selected_drive {
+        file_entries::table
+            .inner_join(drive_entries::table)
+            .filter(drive_entries::name.eq(&drive.name))
+            .filter(file_entries::path.like(&search_pattern))
+            .count()
+            .get_result(conn)?
+    } else {
+        file_entries::table
+            .filter(file_entries::path.like(&search_pattern))
+            .count()
+            .get_result(conn)?
+    };
+    Ok(count)
 }
 
 #[async_trait::async_trait]

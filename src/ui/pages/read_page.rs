@@ -162,6 +162,7 @@ impl ReadPage {
             self.cache.clear();
         }
 
+        let selected_drive = self.drive_combo_box.selected_drive.clone();
         let search_query = self.search.query.clone();
         let query_use_case = self.query_use_case.clone();
         let page = self.pagination.current_page_index;
@@ -171,12 +172,12 @@ impl ReadPage {
             async move {
                 if !search_query.is_empty() {
                     let count = query_use_case
-                        .get_search_count(&search_query)
+                        .get_search_count(&selected_drive, &search_query)
                         .await
                         .unwrap_or(0);
                     if count <= CACHED_SIZE {
                         let full = query_use_case
-                            .search_files(&search_query, 0, count as usize)
+                            .search_files(&selected_drive, &search_query, 0, count as usize)
                             .await;
                         return full.unwrap_or_else(|err| {
                             popup_error(err);
@@ -191,7 +192,7 @@ impl ReadPage {
                 if search_query.is_empty() {
                     query_use_case.list_files(page, ipp).await
                 } else {
-                    query_use_case.search_files(&search_query, page, ipp).await
+                    query_use_case.search_files(&selected_drive, &search_query, page, ipp).await
                 }
                 .unwrap_or_else(|err| {
                     popup_error(err);
@@ -311,6 +312,7 @@ impl ReadPage {
         self.is_cache_warming = true;
         self.file_list.set_files(current_page_items);
 
+        let selected_drive = self.drive_combo_box.selected_drive.clone();
         let search_query = self.search.query.clone();
         let query_use_case = self.query_use_case.clone();
         let total = self.pagination.total_count as usize;
@@ -320,7 +322,7 @@ impl ReadPage {
                 if search_query.is_empty() {
                     query_use_case.list_files(0, total).await
                 } else {
-                    query_use_case.search_files(&search_query, 0, total).await
+                    query_use_case.search_files(&selected_drive, &search_query, 0, total).await
                 }
                 .unwrap_or_else(|error| {
                     popup_error(error);

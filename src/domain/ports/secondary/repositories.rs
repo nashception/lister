@@ -17,12 +17,13 @@ pub trait FileQueryRepository: Send + Sync {
 
     async fn search_files_paginated(
         &self,
+        selected_drive: &Option<Drive>,
         query: &str,
         offset: i64,
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError>;
 
-    async fn count_search_results(&self, query: &str) -> Result<i64, RepositoryError>;
+    async fn count_search_results(&self, selected_drive: &Option<Drive>, query: &str) -> Result<i64, RepositoryError>;
 }
 
 #[async_trait::async_trait]
