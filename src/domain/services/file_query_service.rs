@@ -26,7 +26,7 @@ impl FileQueryUseCase for FileQueryService {
     async fn get_search_count(
         &self,
         selected_drive: &Option<Drive>,
-        query: &str,
+        query: &Option<String>,
     ) -> Result<i64, DomainError> {
         let count = self
             .query_repo
@@ -38,7 +38,7 @@ impl FileQueryUseCase for FileQueryService {
     async fn search_files(
         &self,
         selected_drive: &Option<Drive>,
-        query: &str,
+        query: &Option<String>,
         page: usize,
         page_size: usize,
     ) -> Result<PaginatedResult, DomainError> {
@@ -68,19 +68,5 @@ impl FileQueryUseCase for FileQueryService {
                 .await
                 .map_err(DomainError::Repository)
         }
-    }
-
-    async fn list_files(
-        &self,
-        selected_drive: &Option<Drive>,
-        page: usize,
-        page_size: usize,
-    ) -> Result<PaginatedResult, DomainError> {
-        let offset = (page * page_size) as i64;
-        let limit = page_size as i64;
-        self.query_repo
-            .find_files_paginated(selected_drive, offset, limit)
-            .await
-            .map_err(DomainError::Repository)
     }
 }

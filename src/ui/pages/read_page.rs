@@ -158,49 +158,52 @@ impl ReadPage {
             return self.file_list.snap_to_top();
         }
 
-        if !self.cache.is_valid_for(&self.drive_combo_box.selected_drive, &self.search.query) {
+        if !self
+            .cache
+            .is_valid_for(&self.drive_combo_box.selected_drive, &self.search.query)
+        {
             self.cache.clear();
         }
 
         let selected_drive = self.drive_combo_box.selected_drive.clone();
-        let search_query = self.search.query.clone();
+        let search_query = if self.search.query.is_empty() {
+            None
+        } else {
+            Some(self.search.query.clone())
+        };
         let query_use_case = self.query_use_case.clone();
         let page = self.pagination.current_page_index;
         let ipp = self.pagination.items_per_page;
 
         Task::perform(
             async move {
-                if !search_query.is_empty() {
-                    let count = query_use_case
-                        .get_search_count(&selected_drive, &search_query)
-                        .await
-                        .unwrap_or(0);
-                    if count <= CACHED_SIZE {
-                        let full = query_use_case
-                            .search_files(&selected_drive, &search_query, 0, count as usize)
-                            .await;
-                        return full.unwrap_or_else(|err| {
-                            popup_error(err);
-                            PaginatedResult {
-                                items: vec![],
-                                total_count: 0,
-                            }
-                        });
-                    }
+                let count = query_use_case
+                    .get_search_count(&selected_drive, &search_query)
+                    .await
+                    .unwrap_or(0);
+                if count <= CACHED_SIZE {
+                    let full = query_use_case
+                        .search_files(&selected_drive, &search_query, 0, count as usize)
+                        .await;
+                    return full.unwrap_or_else(|err| {
+                        popup_error(err);
+                        PaginatedResult {
+                            items: vec![],
+                            total_count: 0,
+                        }
+                    });
                 }
 
-                if search_query.is_empty() {
-                    query_use_case.list_files(&selected_drive, page, ipp).await
-                } else {
-                    query_use_case.search_files(&selected_drive, &search_query, page, ipp).await
-                }
-                .unwrap_or_else(|err| {
-                    popup_error(err);
-                    PaginatedResult {
-                        items: vec![],
-                        total_count: 0,
-                    }
-                })
+                query_use_case
+                    .search_files(&selected_drive, &search_query, page, ipp)
+                    .await
+                    .unwrap_or_else(|err| {
+                        popup_error(err);
+                        PaginatedResult {
+                            items: vec![],
+                            total_count: 0,
+                        }
+                    })
             },
             ReadMessage::FilesLoaded,
         )
@@ -289,8 +292,11 @@ impl ReadPage {
 
     fn store_full_and_show_page(&mut self, full_items: Vec<FileWithMetadata>) -> Task<ReadMessage> {
         // store full dataset in cache
-        self.cache
-            .store(self.drive_combo_box.selected_drive.clone(), self.search.query.clone(), full_items.clone());
+        self.cache.store(
+            self.drive_combo_box.selected_drive.clone(),
+            self.search.query.clone(),
+            full_items.clone(),
+        );
 
         if let Some(page_files) = self.cache.get_page(
             &self.drive_combo_box.selected_drive,
@@ -313,24 +319,26 @@ impl ReadPage {
         self.file_list.set_files(current_page_items);
 
         let selected_drive = self.drive_combo_box.selected_drive.clone();
-        let search_query = self.search.query.clone();
+        let search_query = if self.search.query.is_empty() {
+            None
+        } else {
+            Some(self.search.query.clone())
+        };
         let query_use_case = self.query_use_case.clone();
         let total = self.pagination.total_count as usize;
 
         Task::perform(
             async move {
-                if search_query.is_empty() {
-                    query_use_case.list_files(&selected_drive, 0, total).await
-                } else {
-                    query_use_case.search_files(&selected_drive, &search_query, 0, total).await
-                }
-                .unwrap_or_else(|error| {
-                    popup_error(error);
-                    PaginatedResult {
-                        items: vec![],
-                        total_count: 0,
-                    }
-                })
+                query_use_case
+                    .search_files(&selected_drive, &search_query, 0, total)
+                    .await
+                    .unwrap_or_else(|error| {
+                        popup_error(error);
+                        PaginatedResult {
+                            items: vec![],
+                            total_count: 0,
+                        }
+                    })
             },
             ReadMessage::FilesLoaded,
         )

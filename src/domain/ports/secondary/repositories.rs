@@ -9,22 +9,15 @@ use crate::domain::errors::repository_error::RepositoryError;
 pub trait FileQueryRepository: Send + Sync {
     async fn find_all_drives(&self) -> Result<Vec<Drive>, RepositoryError>;
 
-    async fn find_files_paginated(
-        &self,
-        selected_drive: &Option<Drive>,
-        offset: i64,
-        limit: i64,
-    ) -> Result<PaginatedResult, RepositoryError>;
-
     async fn search_files_paginated(
         &self,
         selected_drive: &Option<Drive>,
-        query: &str,
+        query: &Option<String>,
         offset: i64,
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError>;
 
-    async fn count_search_results(&self, selected_drive: &Option<Drive>, query: &str) -> Result<i64, RepositoryError>;
+    async fn count_search_results(&self, selected_drive: &Option<Drive>, query: &Option<String>) -> Result<i64, RepositoryError>;
 }
 
 #[async_trait::async_trait]

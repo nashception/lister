@@ -125,6 +125,33 @@ impl SqliteFileRepository {
 
         Ok(())
     }
+
+    fn count(
+        selected_drive: &Option<Drive>,
+        search_pattern: &Option<String>,
+        conn: &mut DieselConnection,
+    ) -> Result<i64, RepositoryError> {
+        let mut query = file_entries::table
+            .inner_join(drive_entries::table)
+            .into_boxed();
+
+        if let Some(drive) = selected_drive {
+            query = query
+                .filter(drive_entries::name.eq(&drive.name));
+        }
+
+        if let Some(pattern) = search_pattern {
+            query = query.filter(file_entries::path.like(pattern));
+        }
+
+        let count: i64 = query.count().get_result(conn)?;
+        Ok(count)
+    }
+
+    fn search_pattern(query: &Option<String>) -> Option<String> {
+        let search_pattern = query.clone().map(|dto| format!("%{}%", dto).replace(" ", "_"));
+        search_pattern
+    }
 }
 
 #[async_trait::async_trait]
@@ -146,70 +173,22 @@ impl FileQueryRepository for SqliteFileRepository {
             .await?
     }
 
-    async fn find_files_paginated(
-        &self,
-        selected_drive: &Option<Drive>,
-        offset: i64,
-        limit: i64,
-    ) -> Result<PaginatedResult, RepositoryError> {
-        let pool = self.pool.clone();
-        let selected_drive = selected_drive.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
-
-                let total_count: i64 = count(&selected_drive, &None, &mut conn)?;
-
-                let mut query = file_entries::table
-                    .inner_join(drive_entries::table.inner_join(file_categories::table))
-                    .select((
-                        file_categories::name,
-                        drive_entries::name,
-                        file_entries::path,
-                        file_entries::weight,
-                    ))
-                    .limit(limit)
-                    .offset(offset)
-                    .into_boxed();
-
-                if let Some(drive) = selected_drive {
-                    query = query.filter(drive_entries::name.eq(drive.name));
-                }
-
-                let entities = query.load::<FileWithMetadataDto>(&mut conn)?;
-
-                let items = entities
-                    .into_iter()
-                    .map(|dto| FileWithMetadata {
-                        category_name: dto.category_name,
-                        drive_name: dto.drive_name,
-                        path: dto.path,
-                        size_bytes: dto.weight,
-                    })
-                    .collect();
-
-                Ok(PaginatedResult { items, total_count })
-            })
-            .await?
-    }
-
     async fn search_files_paginated(
         &self,
         selected_drive: &Option<Drive>,
-        query: &str,
+        query: &Option<String>,
         offset: i64,
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError> {
         let pool = self.pool.clone();
         let selected_drive = selected_drive.clone();
-        let search_pattern = format!("%{}%", query.replace(" ", "_"));
+        let search_pattern = Self::search_pattern(query);
         TOKIO_RUNTIME
             .handle()
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
 
-                let total_count = count(&selected_drive, &Some(search_pattern.clone()), &mut conn)?;
+                let total_count = Self::count(&selected_drive, &search_pattern, &mut conn)?;
 
                 let mut query = file_entries::table
                     .inner_join(drive_entries::table.inner_join(file_categories::table))
@@ -227,8 +206,8 @@ impl FileQueryRepository for SqliteFileRepository {
                 }
 
                 // Apply search pattern filter
-                if !search_pattern.is_empty() {
-                    query = query.filter(file_entries::path.like(&search_pattern));
+                if let Some(search) = &search_pattern {
+                    query = query.filter(file_entries::path.like(search));
                 }
 
                 let entities = query
@@ -254,42 +233,20 @@ impl FileQueryRepository for SqliteFileRepository {
     async fn count_search_results(
         &self,
         selected_drive: &Option<Drive>,
-        query: &str,
+        query: &Option<String>,
     ) -> Result<i64, RepositoryError> {
         let pool = self.pool.clone();
         let selected_drive = selected_drive.clone();
-        let search_pattern = format!("%{}%", query.replace(" ", "_"));
+        let search_pattern = Self::search_pattern(query);
         TOKIO_RUNTIME
             .handle()
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
-                let count = count(&selected_drive, &Some(search_pattern), &mut conn)?;
+                let count = Self::count(&selected_drive, &search_pattern, &mut conn)?;
                 Ok(count)
             })
             .await?
     }
-}
-
-fn count(
-    selected_drive: &Option<Drive>,
-    search_pattern: &Option<String>,
-    conn: &mut DieselConnection,
-) -> Result<i64, RepositoryError> {
-    let mut query = file_entries::table
-        .inner_join(drive_entries::table)
-        .into_boxed();
-
-    if let Some(drive) = selected_drive {
-        query = query
-            .filter(drive_entries::name.eq(&drive.name));
-    }
-
-    if let Some(pattern) = search_pattern {
-        query = query.filter(file_entries::path.like(pattern));
-    }
-
-    let count: i64 = query.count().get_result(conn)?;
-    Ok(count)
 }
 
 #[async_trait::async_trait]
