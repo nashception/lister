@@ -11,11 +11,10 @@ use crate::domain::ports::secondary::repositories::{
 use crate::infrastructure::database::entities::{
     FileWithMetadataDto, NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
 };
-use crate::infrastructure::database::schema::drive_entries::dsl;
 use crate::infrastructure::database::schema::{
     drive_entries, file_categories, file_entries, settings,
 };
-use diesel::dsl::exists;
+use diesel::dsl::{exists, update};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, TextExpressionMethods};
@@ -58,6 +57,25 @@ impl SqliteFileRepository {
         Ok(())
     }
 
+    fn remove_duplicates(
+        category_name: String,
+        drive_name: String,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), RepositoryError> {
+        diesel::delete(
+            file_entries::table.filter(exists(
+                drive_entries::table
+                    .inner_join(file_categories::table)
+                    .filter(drive_entries::id.eq(file_entries::drive_id))
+                    .filter(file_categories::name.eq(category_name))
+                    .filter(drive_entries::name.eq(drive_name)),
+            )),
+        )
+        .execute(conn)?;
+
+        Ok(())
+    }
+
     fn save_category(
         category_name: String,
         conn: &mut SqliteConnection,
@@ -79,12 +97,25 @@ impl SqliteFileRepository {
         let drive_id = diesel::insert_into(drive_entries::table)
             .values(NewDriveEntryDto {
                 category_id,
-                name: drive.name,
+                name: drive.name.clone(),
                 available_space: drive.available_space,
             })
             .returning(drive_entries::id)
             .get_result(conn)?;
+
+        Self::update_same_drives_available_space(drive, conn)?;
+
         Ok(drive_id)
+    }
+
+    fn update_same_drives_available_space(
+        drive: Drive,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), RepositoryError> {
+        update(drive_entries::table.filter(drive_entries::name.eq(drive.name)))
+            .set(drive_entries::available_space.eq(drive.available_space))
+            .execute(conn)?;
+        Ok(())
     }
 
     fn save_files(
@@ -106,25 +137,6 @@ impl SqliteFileRepository {
             .execute(conn)?;
 
         Ok(insert_count)
-    }
-
-    fn remove_duplicates(
-        category_name: String,
-        drive_name: String,
-        conn: &mut SqliteConnection,
-    ) -> Result<(), RepositoryError> {
-        diesel::delete(
-            file_entries::table.filter(exists(
-                drive_entries::table
-                    .inner_join(file_categories::table)
-                    .filter(drive_entries::id.eq(file_entries::drive_id))
-                    .filter(file_categories::name.eq(category_name))
-                    .filter(drive_entries::name.eq(drive_name)),
-            )),
-        )
-        .execute(conn)?;
-
-        Ok(())
     }
 
     fn count(
@@ -165,7 +177,7 @@ impl FileQueryRepository for SqliteFileRepository {
             .spawn_blocking(move || {
                 let mut conn = pool.get()?;
 
-                let drives = dsl::drive_entries
+                let drives = drive_entries::table
                     .select(drive_entries::name)
                     .distinct()
                     .order(drive_entries::name)

@@ -17,7 +17,11 @@ pub trait FileQueryRepository: Send + Sync {
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError>;
 
-    async fn count_search_results(&self, selected_drive: &Option<String>, query: &Option<String>) -> Result<i64, RepositoryError>;
+    async fn count_search_results(
+        &self,
+        selected_drive: &Option<String>,
+        query: &Option<String>,
+    ) -> Result<i64, RepositoryError>;
 }
 
 #[async_trait::async_trait]
@@ -27,6 +31,7 @@ pub trait FileCommandRepository: Send + Sync {
         category: Category,
         drive: DriveToDelete,
     ) -> Result<(), RepositoryError>;
+
     async fn save(
         &self,
         category: Category,
