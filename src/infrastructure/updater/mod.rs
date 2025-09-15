@@ -1,1 +1,1 @@
-pub mod self_update;
+pub mod updater;
