@@ -203,7 +203,7 @@ impl FileQueryRepository for SqliteFileRepository {
 
                 let total_count = count(&selected_drive, &search_pattern, &mut conn)?;
 
-                let entities = file_entries::table
+                let mut query = file_entries::table
                     .inner_join(drive_entries::table.inner_join(file_categories::table))
                     .select((
                         file_categories::name,
@@ -211,7 +211,19 @@ impl FileQueryRepository for SqliteFileRepository {
                         file_entries::path,
                         file_entries::weight,
                     ))
-                    .filter(file_entries::path.like(&search_pattern))
+                    .into_boxed();
+
+                // Conditionally add drive filter
+                if let Some(drive) = &selected_drive {
+                    query = query.filter(drive_entries::name.eq(&drive.name));
+                }
+
+                // Apply search pattern filter
+                if !search_pattern.is_empty() {
+                    query = query.filter(file_entries::path.like(&search_pattern));
+                }
+
+                let entities = query
                     .limit(limit)
                     .offset(offset)
                     .load::<FileWithMetadataDto>(&mut conn)?;
