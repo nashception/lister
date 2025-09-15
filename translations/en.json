@@ -2,6 +2,7 @@
   "read_page_title": "Lister - Read",
   "read_page": "Read",
   "write_page": "Write",
+  "select_drive_placeholder": "Select drive",
   "search_placeholder": "Search files across all drives...",
   "search_button": "Search",
   "clear_button": "Clear",

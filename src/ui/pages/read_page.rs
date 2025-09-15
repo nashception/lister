@@ -49,7 +49,7 @@ impl ReadPage {
     }
 
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
-        let drive_combo_box = self.drive_combo_box.view();
+        let drive_combo_box = self.drive_combo_box.view(translations);
         let search_section = self.search.view(translations);
         let files = self.file_list.view();
         let pagination_section = self.pagination.view(translations);

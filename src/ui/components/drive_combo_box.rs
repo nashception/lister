@@ -1,9 +1,12 @@
 use crate::domain::entities::drive::Drive;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
+use crate::tr;
 use crate::ui::messages::read_message::ReadMessage;
+use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::popup_error;
 use iced::widget::pick_list;
 use iced::{Element, Task};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct DriveComboBox {
@@ -30,13 +33,13 @@ impl DriveComboBox {
         )
     }
 
-    pub fn view(&'_ self) -> Element<'_, ReadMessage> {
+    pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
         pick_list(
             self.drives.clone(),
             self.selected_drive.clone(),
             ReadMessage::DriveSelected,
         )
-        .placeholder("Select Drive")
+        .placeholder(tr!(translations, "select_drive_placeholder"))
         .into()
     }
 }
