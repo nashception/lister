@@ -2,17 +2,19 @@ use crate::utils::dialogs::{popup_error, popup_info};
 use self_update::backends::github::Update;
 use std::env;
 use std::error::Error;
+use std::path::PathBuf;
 use std::process::{exit, Command};
 
 pub fn self_update() {
+    let exe_path = env::current_exe().expect("Failed to get current exe path");
     let just_updated = env::args().any(|arg| arg == "--updated");
 
     if !just_updated {
         match try_update() {
-            Ok(message) => {
-                if !message.is_empty() {
-                    popup_info(message);
-                    restart()
+            Ok(new_version) => {
+                if !new_version.is_empty() {
+                    popup_info(format!("New version has been installed: {}", new_version));
+                    restart(exe_path)
                 }
             }
             Err(e) => popup_error(format!("Update failed: {}", e)),
@@ -21,28 +23,25 @@ pub fn self_update() {
 }
 
 fn try_update() -> Result<String, Box<dyn Error>> {
-    let version = env!("CARGO_PKG_VERSION");
     let status = Update::configure()
         .repo_owner("nashception")
         .repo_name("lister")
         .bin_name("lister")
-        .current_version(version)
+        .current_version(env!("CARGO_PKG_VERSION"))
         .no_confirm(true)
         .build()?
         .update()?;
 
-    let new_version = status.version();
-    let message = if new_version > version {
-        format!("New version has been installed: {}", new_version)
+    let new_version = if status.updated() {
+        String::from(status.version())
     } else {
-        String::default()
+        String::new()
     };
-    Ok(message)
+
+    Ok(new_version)
 }
 
-fn restart() {
-    let exe_path = env::current_exe().expect("Failed to get current exe path");
-
+fn restart(exe_path: PathBuf) {
     Command::new(exe_path)
         .arg("--updated")
         .spawn()
