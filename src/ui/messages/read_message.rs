@@ -8,22 +8,16 @@ pub enum ReadMessage {
     PageInputSubmit,
     NextPage,
     LastPage,
+    DrivesFetched(Vec<String>),
+    DriveSelected(String),
     SearchSubmit,
     ContentChanged(String),
     SearchClear,
     FilesLoaded(PaginatedResult),
-    ArrowLeftPressed {
-        shift: bool,
-    },
-    ArrowRightPressed {
-        shift: bool,
-    },
-    ArrowUpPressed {
-        shift: bool,
-    },
-    ArrowDownPressed {
-        shift: bool,
-    },
+    ArrowLeftPressed { shift: bool },
+    ArrowRightPressed { shift: bool },
+    ArrowUpPressed { shift: bool },
+    ArrowDownPressed { shift: bool },
     ArrowNavigationReleased,
     PageUpPressed,
     PageDownPressed,

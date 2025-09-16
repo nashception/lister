@@ -2,6 +2,7 @@
   "read_page_title": "Listeur - Lecture",
   "read_page": "Lecture",
   "write_page": "Écriture",
+  "select_drive_placeholder": "Sélectionnez un disque",
   "search_placeholder": "Rechercher des fichiers sur tous les lecteurs...",
   "search_button": "Rechercher",
   "clear_button": "Effacer",

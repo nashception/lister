@@ -8,17 +8,20 @@ use crate::domain::entities::pagination::PaginatedResult;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
 use crate::ui::components::cache::Cache;
+use crate::ui::components::drive_combo_box::DriveComboBox;
 use crate::ui::components::file_list::FileList;
 use crate::ui::components::pagination::Pagination;
 use crate::ui::components::search::Search;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
-use iced::widget::column;
+use iced::widget::{column, row};
 use iced::{keyboard, Element, Subscription, Task};
+use crate::domain::entities::language::Language;
 
 pub struct ReadPage {
     query_use_case: Arc<dyn FileQueryUseCase>,
+    drive_combo_box: DriveComboBox,
     search: Search,
     pagination: Pagination,
     file_list: FileList,
@@ -28,32 +31,38 @@ pub struct ReadPage {
 
 impl ReadPage {
     pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
+        let (drive_combo_box, combo_box_task) = DriveComboBox::new(query_use_case.clone());
         let (search, search_task) = Search::new();
-        let mut page = Self {
+        let page = Self {
             query_use_case,
+            drive_combo_box,
             search,
             pagination: Pagination::new(ITEMS_PER_PAGE),
             file_list: FileList::new(),
             cache: Cache::new(),
             is_cache_warming: false,
         };
-        let task = page.load_current_page();
-        (page, search_task.chain(task))
+        (page, Task::batch([combo_box_task, search_task]))
     }
 
     pub fn title(&self, translations: &HashMap<String, String>) -> String {
         tr!(translations, "read_page_title")
     }
 
-    pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
+    pub fn view(&'_ self, translations: &HashMap<String, String>, language: &Language) -> Element<'_, ReadMessage> {
+        let drive_combo_box = self.drive_combo_box.view(translations);
         let search_section = self.search.view(translations);
-        let files = self.file_list.view();
+        let files = self.file_list.view(language);
         let pagination_section = self.pagination.view(translations);
 
-        column![search_section, files, pagination_section]
-            .spacing(20)
-            .padding(20)
-            .into()
+        column![
+            row![drive_combo_box, search_section].spacing(10),
+            files,
+            pagination_section
+        ]
+        .spacing(20)
+        .padding(20)
+        .into()
     }
 
     pub fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
@@ -63,6 +72,14 @@ impl ReadPage {
             ReadMessage::FirstPage => self.navigate_to_page(0),
             ReadMessage::LastPage => {
                 self.navigate_to_page(self.pagination.total_pages().saturating_sub(1))
+            }
+            ReadMessage::DrivesFetched(drives) => {
+                self.drive_combo_box.drives = drives;
+                Task::none()
+            }
+            ReadMessage::DriveSelected(drive) => {
+                self.drive_combo_box.selected_drive = Some(drive);
+                self.process_new_search()
             }
             ReadMessage::SearchSubmit => self.process_new_search(),
             ReadMessage::SearchClear => self.clear_search(),
@@ -132,6 +149,7 @@ impl ReadPage {
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {
         if let Some(files) = self.cache.get_page(
+            &self.drive_combo_box.selected_drive,
             &self.search.query,
             self.pagination.current_page_index,
             ITEMS_PER_PAGE,
@@ -140,41 +158,45 @@ impl ReadPage {
             return self.file_list.snap_to_top();
         }
 
-        if !self.cache.is_valid_for(&self.search.query) {
+        if !self
+            .cache
+            .is_valid_for(&self.drive_combo_box.selected_drive, &self.search.query)
+        {
             self.cache.clear();
         }
 
-        let search_query = self.search.query.clone();
+        let selected_drive = self.drive_combo_box.selected_drive.clone();
+        let search_query = if self.search.query.is_empty() {
+            None
+        } else {
+            Some(self.search.query.clone())
+        };
         let query_use_case = self.query_use_case.clone();
         let page = self.pagination.current_page_index;
         let ipp = self.pagination.items_per_page;
 
         Task::perform(
             async move {
-                if !search_query.is_empty() {
-                    let count = query_use_case
-                        .get_search_count(&search_query)
-                        .await
-                        .unwrap_or(0);
-                    if count <= CACHED_SIZE {
-                        let full = query_use_case
-                            .search_files(&search_query, 0, count as usize)
-                            .await;
-                        return full.unwrap_or_else(|err| {
-                            popup_error(err);
-                            PaginatedResult {
-                                items: vec![],
-                                total_count: 0,
-                            }
-                        });
-                    }
+                let count = query_use_case
+                    .get_search_count(&selected_drive, &search_query)
+                    .await
+                    .unwrap_or(0);
+                if count <= CACHED_SIZE {
+                    let full = query_use_case
+                        .search_files(&selected_drive, &search_query, 0, count as usize)
+                        .await;
+                    return full.unwrap_or_else(|err| {
+                        popup_error(err);
+                        PaginatedResult {
+                            items: vec![],
+                            total_count: 0,
+                        }
+                    });
                 }
 
-                if search_query.is_empty() {
-                    query_use_case.list_files(page, ipp).await
-                } else {
-                    query_use_case.search_files(&search_query, page, ipp).await
-                }
+                query_use_case
+                    .search_files(&selected_drive, &search_query, page, ipp)
+                    .await
                     .unwrap_or_else(|err| {
                         popup_error(err);
                         PaginatedResult {
@@ -217,8 +239,12 @@ impl ReadPage {
     }
 
     fn clear_search(&mut self) -> Task<ReadMessage> {
+        self.drive_combo_box.selected_drive = None;
         self.search.clear();
-        self.process_new_search()
+        self.cache.clear();
+        self.file_list.clear();
+        self.pagination.clear();
+        Task::none()
     }
 
     fn process_page_input(&mut self) -> Task<ReadMessage> {
@@ -269,10 +295,14 @@ impl ReadPage {
 
     fn store_full_and_show_page(&mut self, full_items: Vec<FileWithMetadata>) -> Task<ReadMessage> {
         // store full dataset in cache
-        self.cache
-            .store(self.search.query.clone(), full_items.clone());
+        self.cache.store(
+            self.drive_combo_box.selected_drive.clone(),
+            self.search.query.clone(),
+            full_items.clone(),
+        );
 
         if let Some(page_files) = self.cache.get_page(
+            &self.drive_combo_box.selected_drive,
             &self.search.query,
             self.pagination.current_page_index,
             ITEMS_PER_PAGE,
@@ -291,17 +321,20 @@ impl ReadPage {
         self.is_cache_warming = true;
         self.file_list.set_files(current_page_items);
 
-        let search_query = self.search.query.clone();
+        let selected_drive = self.drive_combo_box.selected_drive.clone();
+        let search_query = if self.search.query.is_empty() {
+            None
+        } else {
+            Some(self.search.query.clone())
+        };
         let query_use_case = self.query_use_case.clone();
         let total = self.pagination.total_count as usize;
 
         Task::perform(
             async move {
-                if search_query.is_empty() {
-                    query_use_case.list_files(0, total).await
-                } else {
-                    query_use_case.search_files(&search_query, 0, total).await
-                }
+                query_use_case
+                    .search_files(&selected_drive, &search_query, 0, total)
+                    .await
                     .unwrap_or_else(|error| {
                         popup_error(error);
                         PaginatedResult {

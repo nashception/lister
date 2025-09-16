@@ -65,7 +65,7 @@ impl ListerApp {
         let nav_bar = self.nav_bar();
 
         let content = match &self.current_page {
-            Page::Read(page) => page.view(&self.translations).map(AppMessage::Read),
+            Page::Read(page) => page.view(&self.translations, &self.current_language).map(AppMessage::Read),
             Page::Write(page) => page.view(&self.translations).map(AppMessage::Write),
         };
 
