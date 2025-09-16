@@ -3,11 +3,16 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*" # triggers only when you push tags like v1.0.0
+      - "v*.*.*"
 
 jobs:
-  build-windows:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-pc-windows-gnu
+          - x86_64-unknown-linux-gnu
 
     steps:
       - name: Checkout repository
@@ -16,18 +21,28 @@ jobs:
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Build Windows binary with cross
-        run: cross build --release --target x86_64-pc-windows-gnu
+      - name: Build binary with cross
+        run: cross build --release --target ${{ matrix.target }}
 
       - name: Strip binary
-        run: strip target/x86_64-pc-windows-gnu/release/lister.exe
+        run: |
+          if [ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]; then
+            strip target/${{ matrix.target }}/release/lister.exe
+          elif [ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]; then
+            strip target/${{ matrix.target }}/release/lister
+          fi
 
       - name: Rename binary
-        run: mv target/x86_64-pc-windows-gnu/release/lister.exe target/x86_64-pc-windows-gnu/release/lister-x86_64-pc-windows-gnu.exe
+        run: |
+          if [ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]; then
+            mv target/${{ matrix.target }}/release/lister.exe target/${{ matrix.target }}/release/lister-${{ matrix.target }}.exe
+          elif [ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]; then
+            mv target/${{ matrix.target }}/release/lister target/${{ matrix.target }}/release/lister-${{ matrix.target }}
+          fi
 
       - name: Upload binary to release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/x86_64-pc-windows-gnu/release/lister-x86_64-pc-windows-gnu.exe
+          files: target/${{ matrix.target }}/release/lister-${{ matrix.target }}*
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
