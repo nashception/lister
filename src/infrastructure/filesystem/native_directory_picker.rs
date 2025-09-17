@@ -1,12 +1,13 @@
+use crate::domain::entities::directory::DirectoryData;
 use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
+use crate::infrastructure::filesystem::directory::directory_data;
 use rfd::AsyncFileDialog;
-use std::path::PathBuf;
 
 pub struct NativeDirectoryPicker;
 
 #[async_trait::async_trait]
 impl DirectoryPicker for NativeDirectoryPicker {
-    async fn pick_directory(&self) -> Option<PathBuf> {
+    async fn pick_directory(&self) -> Option<DirectoryData> {
         #[cfg(target_os = "linux")]
         {
             // On Linux, we need a runtime
@@ -22,11 +23,11 @@ impl DirectoryPicker for NativeDirectoryPicker {
 }
 
 impl NativeDirectoryPicker {
-    async fn directory_picker() -> Option<PathBuf> {
+    async fn directory_picker() -> Option<DirectoryData> {
         AsyncFileDialog::new()
             .set_title("Select Directory to Index")
             .pick_folder()
             .await
-            .map(|handle| handle.path().to_path_buf())
+            .map(|handle| directory_data(handle.path()))
     }
 }
