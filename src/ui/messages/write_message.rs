@@ -1,15 +1,15 @@
+use crate::domain::entities::directory::DirectoryData;
 use crate::domain::entities::file_entry::FileEntry;
-use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub enum WriteMessage {
-    CategoryChanged(String),
-    DriveChanged(String),
     DirectoryPressed,
-    DirectoryChanged(Option<PathBuf>),
+    DirectoryChanged(Option<DirectoryData>),
+    CategoryChanged(String),
+    DiskChanged(String),
     DatabaseCleaned,
     WriteSubmit,
-    ScanDirectoryFinished((PathBuf, Vec<FileEntry>)),
+    ScanDirectoryFinished(Vec<FileEntry>),
     InsertInDatabaseFinished(usize),
     ResetForm,
 }

@@ -1,33 +1,36 @@
 use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
-use crate::infrastructure::filesystem::drive_space::available_space;
 use crate::tr;
+use crate::ui::components::write::indexing::{indexing_state, IndexingState};
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
-use iced::widget::{button, column, focus_next, row, text, text_input, Rule};
+use iced::widget::{button, column, row, text, text_input, Rule};
 use iced::{Alignment, Element, Length, Task};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[derive(PartialEq)]
-enum IndexingState {
-    Ready,
-    CleaningDatabase,
-    Scanning,
-    Saving,
-    Completed { files_indexed: usize },
+#[derive(Default)]
+struct WriteData {
+    directory: Option<PathBuf>,
+    category: String,
+    drive: String,
+    drive_available_space: u64,
+}
+
+impl WriteData {
+    fn is_complete(&self) -> bool {
+        self.directory.is_some() && !self.category.is_empty() && !self.drive.is_empty()
+    }
 }
 
 pub struct WritePage {
     indexing_use_case: Arc<dyn FileIndexingUseCase>,
     directory_picker: Arc<dyn DirectoryPicker>,
-    category: String,
-    drive: String,
-    directory: Option<PathBuf>,
     state: IndexingState,
+    write_data: WriteData,
 }
 
 impl WritePage {
@@ -38,12 +41,10 @@ impl WritePage {
         let page = Self {
             indexing_use_case,
             directory_picker,
-            category: String::new(),
-            drive: String::new(),
-            directory: None,
             state: IndexingState::Ready,
+            write_data: Default::default(),
         };
-        (page, focus_next())
+        (page, Task::none())
     }
 
     pub fn title(&self, translations: &HashMap<String, String>) -> String {
@@ -53,7 +54,7 @@ impl WritePage {
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
         let form_section = self.form_section(translations);
         let action_section = self.action_section(translations);
-        let status_section = self.status_section(translations);
+        let status_section = indexing_state(&self.state, translations);
 
         column![form_section, action_section, status_section]
             .spacing(20)
@@ -63,14 +64,6 @@ impl WritePage {
 
     pub fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
         match message {
-            WriteMessage::CategoryChanged(value) => {
-                self.category = value;
-                Task::none()
-            }
-            WriteMessage::DriveChanged(value) => {
-                self.drive = value;
-                Task::none()
-            }
             WriteMessage::DirectoryPressed => {
                 let picker = self.directory_picker.clone();
                 Task::perform(
@@ -78,14 +71,31 @@ impl WritePage {
                     WriteMessage::DirectoryChanged,
                 )
             }
-            WriteMessage::DirectoryChanged(directory) => {
-                self.directory = directory;
+            WriteMessage::DirectoryChanged(selected_data) => {
+                if let Some(data) = selected_data {
+                    let directory = data.directory;
+                    self.write_data.category = directory
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    self.write_data.directory = Some(directory);
+                    self.write_data.drive = data.drive_name;
+                    self.write_data.drive_available_space = data.drive_available_space;
+                };
+                Task::none()
+            }
+            WriteMessage::CategoryChanged(value) => {
+                self.write_data.category = value;
+                Task::none()
+            }
+            WriteMessage::DiskChanged(value) => {
+                self.write_data.drive = value;
                 Task::none()
             }
             WriteMessage::WriteSubmit => self.clean_database(),
             WriteMessage::DatabaseCleaned => self.start_indexing(),
-            WriteMessage::ScanDirectoryFinished((directory, scanned_files)) => {
-                self.insert_in_database(directory, scanned_files)
+            WriteMessage::ScanDirectoryFinished(scanned_files) => {
+                self.insert_in_database(scanned_files)
             }
             WriteMessage::InsertInDatabaseFinished(count) => {
                 self.state = IndexingState::Completed {
@@ -101,30 +111,30 @@ impl WritePage {
     }
 
     fn form_section(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
-        let category_input = text_input(&tr!(translations, "category_placeholder"), &self.category)
+        let directory_section = self.directory_section(translations);
+
+        let category_input = text_input(&tr!(translations, "category_placeholder"), &self.write_data.category)
             .on_input(WriteMessage::CategoryChanged)
             .padding(10)
             .width(Length::Fill);
 
-        let drive_input = text_input(&tr!(translations, "drive_placeholder"), &self.drive)
-            .on_input(WriteMessage::DriveChanged)
+        let drive_input = text_input(&tr!(translations, "drive_placeholder"), &self.write_data.drive)
+            .on_input(WriteMessage::DiskChanged)
             .padding(10)
             .width(Length::Fill);
-
-        let directory_section = self.directory_section(translations);
 
         column![
             text(tr!(translations, "file_indexing_setup"))
                 .size(24)
                 .style(text::primary),
             Rule::horizontal(1),
+            directory_section,
             column![
                 text(tr!(translations, "category_label")).size(16),
                 category_input,
             ]
             .spacing(5),
             column![text(tr!(translations, "drive_label")).size(16), drive_input,].spacing(5),
-            directory_section,
         ]
         .spacing(15)
         .into()
@@ -136,7 +146,7 @@ impl WritePage {
     ) -> Element<'_, WriteMessage> {
         let directory_label = text(tr!(translations, "directory_label")).size(16);
 
-        let directory_display = if let Some(dir) = &self.directory {
+        let directory_display = if let Some(dir) = &self.write_data.directory {
             text(tr!(translations, "selected_directory", "dir" => &dir.display().to_string()))
                 .style(text::success)
         } else {
@@ -162,7 +172,7 @@ impl WritePage {
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
-        let can_submit = self.form_is_complete() && self.state == IndexingState::Ready;
+        let can_submit = self.write_data.is_complete() && self.state == IndexingState::Ready;
 
         let submit_button = button(text(tr!(translations, "start_indexing")))
             .on_press_maybe(if can_submit {
@@ -178,7 +188,7 @@ impl WritePage {
                 button::text
             });
 
-        let requirements_text = if !self.form_is_complete() {
+        let requirements_text = if !(!self.write_data.is_complete()) {
             text(tr!(translations, "fill_all_fields"))
                 .style(text::secondary)
                 .size(12)
@@ -191,69 +201,6 @@ impl WritePage {
             .into()
     }
 
-    fn status_section(
-        &'_ self,
-        translations: &HashMap<String, String>,
-    ) -> Element<'_, WriteMessage> {
-        match &self.state {
-            IndexingState::Ready => column![].into(),
-            IndexingState::CleaningDatabase => column![
-                text(tr!(translations, "clean_status"))
-                    .size(18)
-                    .style(text::primary),
-                text(tr!(translations, "clean_details"))
-                    .style(text::secondary)
-                    .size(14),
-            ]
-            .spacing(10)
-            .into(),
-            IndexingState::Scanning => column![
-                text(tr!(translations, "scan_status"))
-                    .size(18)
-                    .style(text::primary),
-                text(tr!(translations, "scan_details"))
-                    .style(text::secondary)
-                    .size(14),
-            ]
-            .spacing(10)
-            .into(),
-            IndexingState::Saving => column![
-                text(tr!(translations, "save_status"))
-                    .size(18)
-                    .style(text::primary),
-                text(tr!(translations, "save_details"))
-                    .style(text::secondary)
-                    .size(14),
-            ]
-            .spacing(10)
-            .into(),
-            IndexingState::Completed { files_indexed } => column![
-                Rule::horizontal(1),
-                column![
-                    text(tr!(translations, "done_status"))
-                        .size(18)
-                        .style(text::success),
-                    text(
-                        tr!(translations, "done_details", "nb_files" => &files_indexed.to_string())
-                    )
-                    .style(text::success)
-                    .size(14),
-                    button(text(tr!(translations, "start_new_indexing")))
-                        .on_press(WriteMessage::ResetForm)
-                        .padding(10)
-                        .style(button::secondary),
-                ]
-                .spacing(10),
-            ]
-            .spacing(15)
-            .into(),
-        }
-    }
-
-    fn form_is_complete(&self) -> bool {
-        !self.category.is_empty() && !self.drive.is_empty() && self.directory.is_some()
-    }
-
     fn clean_database(&mut self) -> Task<WriteMessage> {
         if self.state != IndexingState::Ready {
             return Task::none();
@@ -261,8 +208,8 @@ impl WritePage {
         self.state = IndexingState::CleaningDatabase;
 
         let indexing_use_case = self.indexing_use_case.clone();
-        let category = self.category.clone();
-        let drive = self.drive.clone();
+        let category = self.write_data.category.clone();
+        let drive = self.write_data.drive.clone();
 
         Task::perform(
             async move {
@@ -282,17 +229,16 @@ impl WritePage {
         self.state = IndexingState::Scanning;
 
         let indexing_use_case = self.indexing_use_case.clone();
-        if let Some(directory) = self.directory.clone() {
+        if let Some(directory) = self.write_data.directory.clone() {
             Task::perform(
                 async move {
-                    let files = indexing_use_case
+                    indexing_use_case
                         .scan_directory(&directory)
                         .await
                         .unwrap_or_else(|error| {
                             popup_error(error);
                             Vec::new()
-                        });
-                    (directory, files)
+                        })
                 },
                 WriteMessage::ScanDirectoryFinished,
             )
@@ -301,24 +247,21 @@ impl WritePage {
         }
     }
 
-    fn insert_in_database(
-        &mut self,
-        directory: PathBuf,
-        files: Vec<FileEntry>,
-    ) -> Task<WriteMessage> {
+    fn insert_in_database(&mut self, files: Vec<FileEntry>) -> Task<WriteMessage> {
         if self.state != IndexingState::Scanning {
             return Task::none();
         }
         self.state = IndexingState::Saving;
 
         let indexing_use_case = self.indexing_use_case.clone();
-        let category = self.category.clone();
-        let drive = self.drive.clone();
+        let category = self.write_data.category.clone();
+        let drive = self.write_data.drive.clone();
+        let drive_available_space = self.write_data.drive_available_space.clone();
 
         Task::perform(
             async move {
                 indexing_use_case
-                    .insert_in_database(category, drive, available_space(directory) as i64, files)
+                    .insert_in_database(category, drive, drive_available_space as i64, files)
                     .await
                     .unwrap_or(0)
             },
