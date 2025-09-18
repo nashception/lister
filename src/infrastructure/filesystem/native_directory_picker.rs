@@ -16,7 +16,7 @@ impl DirectoryPicker for NativeDirectoryPicker {
 
         #[cfg(not(target_os = "linux"))]
         {
-            // On Windows/macOS, can await directly
+            // On Windows, can await directly
             Self::directory_picker().await
         }
     }
