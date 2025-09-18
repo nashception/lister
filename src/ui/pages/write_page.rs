@@ -1,5 +1,6 @@
 use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
+use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
 use crate::tr;
 use crate::ui::components::write::indexing::{indexing_spinner, indexing_state, IndexingState};
@@ -27,22 +28,27 @@ impl WriteData {
 }
 
 pub struct WritePage {
+    query_use_case: Arc<dyn FileQueryUseCase>,
     indexing_use_case: Arc<dyn FileIndexingUseCase>,
     directory_picker: Arc<dyn DirectoryPicker>,
     state: IndexingState,
     write_data: WriteData,
+    drive_already_exists: bool,
 }
 
 impl WritePage {
     pub fn new(
+        query_use_case: Arc<dyn FileQueryUseCase>,
         indexing_use_case: Arc<dyn FileIndexingUseCase>,
         directory_picker: Arc<dyn DirectoryPicker>,
     ) -> (Self, Task<WriteMessage>) {
         let page = Self {
+            query_use_case,
             indexing_use_case,
             directory_picker,
             state: IndexingState::Ready,
             write_data: Default::default(),
+            drive_already_exists: false,
         };
         (page, Task::none())
     }
@@ -83,8 +89,26 @@ impl WritePage {
                         directory: Some(data.directory),
                         drive: data.drive_name,
                         drive_available_space: data.drive_available_space,
-                    }
-                };
+                    };
+
+                    let query_use_case = self.query_use_case.clone();
+                    let category = self.write_data.category.clone();
+                    let drive = self.write_data.drive.clone();
+                    Task::perform(
+                        async move {
+                            query_use_case
+                                .drive_already_exists(&category, &drive)
+                                .await
+                                .unwrap_or(false)
+                        },
+                        WriteMessage::DriveAlreadyExistChecked,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            WriteMessage::DriveAlreadyExistChecked(exists) => {
+                self.drive_already_exists = exists;
                 Task::none()
             }
             WriteMessage::CategoryChanged(value) => {
@@ -167,9 +191,15 @@ impl WritePage {
             .padding(10)
             .style(button::secondary);
 
+        let drive_already_exists = if self.drive_already_exists {
+            text(tr!(translations, "drive_already_exists")).style(text::danger)
+        } else {
+            text("")
+        };
+
         column![
             directory_label,
-            row![directory_display, browse_button]
+            row![directory_display, browse_button, drive_already_exists]
                 .spacing(10)
                 .align_y(Alignment::Center),
         ]

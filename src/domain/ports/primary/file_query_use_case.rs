@@ -18,4 +18,6 @@ pub trait FileQueryUseCase: Send + Sync {
         page: usize,
         page_size: usize,
     ) -> Result<PaginatedResult, DomainError>;
+    
+    async fn drive_already_exists(&self, category: &String, drive: &String) -> Result<bool, DomainError>;
 }
