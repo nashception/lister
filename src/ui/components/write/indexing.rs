@@ -1,8 +1,8 @@
 use crate::tr;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
-use iced::widget::column;
 use iced::widget::{button, text};
+use iced::widget::column;
 use iced::Element;
 use iced_aw::spinner::Spinner;
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ pub fn indexing_state<'a>(
     translations: &HashMap<String, String>,
 ) -> Element<'a, WriteMessage> {
     match state {
-        IndexingState::Ready => column![].into(),
+        IndexingState::Ready => column![],
         IndexingState::CleaningDatabase => column![
             text(tr!(translations, "clean_status"))
                 .size(18)
@@ -41,8 +41,7 @@ pub fn indexing_state<'a>(
                 .style(text::secondary)
                 .size(14),
         ]
-        .spacing(10)
-        .into(),
+        .spacing(10),
         IndexingState::Scanning => column![
             text(tr!(translations, "scan_status"))
                 .size(18)
@@ -51,8 +50,7 @@ pub fn indexing_state<'a>(
                 .style(text::secondary)
                 .size(14),
         ]
-        .spacing(10)
-        .into(),
+        .spacing(10),
         IndexingState::Saving => column![
             text(tr!(translations, "save_status"))
                 .size(18)
@@ -61,8 +59,7 @@ pub fn indexing_state<'a>(
                 .style(text::secondary)
                 .size(14),
         ]
-        .spacing(10)
-        .into(),
+        .spacing(10),
         IndexingState::Completed { files_indexed } => column![
             iced::widget::column![
                 text(tr!(translations, "done_status"))
@@ -78,7 +75,7 @@ pub fn indexing_state<'a>(
             ]
             .spacing(10),
         ]
-        .spacing(15)
-        .into(),
+        .spacing(15),
     }
+    .into()
 }

@@ -15,7 +15,7 @@ use crate::infrastructure::database::schema::{
     drive_entries, file_categories, file_entries, settings,
 };
 use chrono::Local;
-use diesel::dsl::{exists, update};
+use diesel::dsl::{exists, select, update};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, TextExpressionMethods};
@@ -163,10 +163,9 @@ impl SqliteFileRepository {
     }
 
     fn search_pattern(query: &Option<String>) -> Option<String> {
-        let search_pattern = query
+        query
             .clone()
-            .map(|dto| format!("%{}%", dto).replace(" ", "_"));
-        search_pattern
+            .map(|dto| format!("%{}%", dto).replace(" ", "_"))
     }
 }
 
@@ -265,6 +264,38 @@ impl FileQueryRepository for SqliteFileRepository {
                 let mut conn = pool.get()?;
                 let count = Self::count(&selected_drive, &search_pattern, &mut conn)?;
                 Ok(count)
+            })
+            .await?
+    }
+
+    async fn drive_already_exists(
+        &self,
+        category: &String,
+        drive: &String,
+    ) -> Result<bool, RepositoryError> {
+        let pool = self.pool.clone();
+        let category = category.clone();
+        let drive = drive.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get()?;
+
+                let subquery = drive_entries::table
+                    .inner_join(
+                        file_categories::table
+                            .on(drive_entries::category_id.eq(file_categories::id)),
+                    )
+                    .filter(
+                        drive_entries::name
+                            .eq(&drive)
+                            .and(file_categories::name.eq(&category)),
+                    )
+                    .select(diesel::dsl::sql::<diesel::sql_types::Bool>("1"));
+
+                let found: bool = select(exists(subquery)).get_result(&mut conn)?;
+
+                Ok(found)
             })
             .await?
     }

@@ -94,6 +94,7 @@ impl ListerApp {
             AppMessage::GoToWrite => {
                 if matches!(self.current_page, Page::Read(_)) {
                     let (write_page, task) = WritePage::new(
+                        self.service.query_use_case.clone(),
                         self.service.indexing_use_case.clone(),
                         self.service.directory_picker.clone(),
                     );

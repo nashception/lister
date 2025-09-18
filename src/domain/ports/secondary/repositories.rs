@@ -22,6 +22,8 @@ pub trait FileQueryRepository: Send + Sync {
         selected_drive: &Option<String>,
         query: &Option<String>,
     ) -> Result<i64, RepositoryError>;
+
+    async fn drive_already_exists(&self, category: &String, drive: &String) -> Result<bool, RepositoryError>;
 }
 
 #[async_trait::async_trait]
