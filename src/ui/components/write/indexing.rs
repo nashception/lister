@@ -2,8 +2,9 @@ use crate::tr;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
 use iced::widget::column;
-use iced::widget::{button, text, Rule};
+use iced::widget::{button, text};
 use iced::Element;
+use iced_aw::spinner::Spinner;
 use std::collections::HashMap;
 
 #[derive(PartialEq)]
@@ -13,6 +14,17 @@ pub enum IndexingState {
     Scanning,
     Saving,
     Completed { files_indexed: usize },
+}
+
+pub fn indexing_spinner<'a>(state: &IndexingState) -> Element<'a, WriteMessage> {
+    if matches!(
+        state,
+        IndexingState::CleaningDatabase | IndexingState::Scanning | IndexingState::Saving
+    ) {
+        Spinner::new().into()
+    } else {
+        text("").into()
+    }
 }
 
 pub fn indexing_state<'a>(
@@ -52,7 +64,6 @@ pub fn indexing_state<'a>(
         .spacing(10)
         .into(),
         IndexingState::Completed { files_indexed } => column![
-            Rule::horizontal(1),
             iced::widget::column![
                 text(tr!(translations, "done_status"))
                     .size(18)

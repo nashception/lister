@@ -2,7 +2,7 @@ use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
 use crate::tr;
-use crate::ui::components::write::indexing::{indexing_state, IndexingState};
+use crate::ui::components::write::indexing::{indexing_spinner, indexing_state, IndexingState};
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 #[derive(Default)]
 struct WriteData {
-    directory: Option<PathBuf>,
     category: String,
+    directory: Option<PathBuf>,
     drive: String,
     drive_available_space: u64,
 }
@@ -54,12 +54,17 @@ impl WritePage {
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
         let form_section = self.form_section(translations);
         let action_section = self.action_section(translations);
+        let spinner = indexing_spinner(&self.state);
         let status_section = indexing_state(&self.state, translations);
 
-        column![form_section, action_section, status_section]
-            .spacing(20)
-            .padding(20)
-            .into()
+        column![
+            form_section,
+            action_section,
+            row![spinner, status_section].spacing(10)
+        ]
+        .spacing(20)
+        .padding(20)
+        .into()
     }
 
     pub fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
@@ -73,14 +78,12 @@ impl WritePage {
             }
             WriteMessage::DirectoryChanged(selected_data) => {
                 if let Some(data) = selected_data {
-                    let directory = data.directory;
-                    self.write_data.category = directory
-                        .file_name()
-                        .map(|f| f.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    self.write_data.directory = Some(directory);
-                    self.write_data.drive = data.drive_name;
-                    self.write_data.drive_available_space = data.drive_available_space;
+                    self.write_data = WriteData {
+                        category: data.file_name(),
+                        directory: Some(data.directory),
+                        drive: data.drive_name,
+                        drive_available_space: data.drive_available_space,
+                    }
                 };
                 Task::none()
             }
@@ -113,15 +116,21 @@ impl WritePage {
     fn form_section(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
         let directory_section = self.directory_section(translations);
 
-        let category_input = text_input(&tr!(translations, "category_placeholder"), &self.write_data.category)
-            .on_input(WriteMessage::CategoryChanged)
-            .padding(10)
-            .width(Length::Fill);
+        let category_input = text_input(
+            &tr!(translations, "category_placeholder"),
+            &self.write_data.category,
+        )
+        .on_input(WriteMessage::CategoryChanged)
+        .padding(10)
+        .width(Length::Fill);
 
-        let drive_input = text_input(&tr!(translations, "drive_placeholder"), &self.write_data.drive)
-            .on_input(WriteMessage::DiskChanged)
-            .padding(10)
-            .width(Length::Fill);
+        let drive_input = text_input(
+            &tr!(translations, "drive_placeholder"),
+            &self.write_data.drive,
+        )
+        .on_input(WriteMessage::DiskChanged)
+        .padding(10)
+        .width(Length::Fill);
 
         column![
             text(tr!(translations, "file_indexing_setup"))
