@@ -58,6 +58,21 @@ impl SqliteFileRepository {
         Ok(())
     }
 
+    async fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    where
+        F: FnOnce(&mut DieselConnection) -> Result<R, RepositoryError> + Send + 'static,
+        R: Send + 'static,
+    {
+        let pool = self.pool.clone();
+        TOKIO_RUNTIME
+            .handle()
+            .spawn_blocking(move || {
+                let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
+                operation(&mut conn)
+            })
+            .await?
+    }
+
     fn remove_duplicates(
         category_name: String,
         drive_name: String,
@@ -172,21 +187,14 @@ impl SqliteFileRepository {
 #[async_trait::async_trait]
 impl FileQueryRepository for SqliteFileRepository {
     async fn find_all_drive_names(&self) -> Result<Vec<String>, RepositoryError> {
-        let pool = self.pool.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
-
-                let drives = drive_entries::table
-                    .select(drive_entries::name)
-                    .distinct()
-                    .order(drive_entries::name)
-                    .load::<String>(&mut conn)?;
-
-                Ok(drives)
-            })
-            .await?
+        self.execute_db_operation(|conn| {
+            let drives = drive_entries::table
+                .select(drive_entries::name)
+                .distinct()
+                .order(drive_entries::name)
+                .load::<String>(conn)?;
+            Ok(drives)
+        }).await
     }
 
     async fn search_files_paginated(
@@ -196,58 +204,53 @@ impl FileQueryRepository for SqliteFileRepository {
         offset: i64,
         limit: i64,
     ) -> Result<PaginatedResult, RepositoryError> {
-        let pool = self.pool.clone();
         let selected_drive = selected_drive.clone();
         let search_pattern = Self::search_pattern(query);
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
+        
+        self.execute_db_operation(move |conn| {
+            let total_count = Self::count(&selected_drive, &search_pattern, conn)?;
 
-                let total_count = Self::count(&selected_drive, &search_pattern, &mut conn)?;
+            let mut query = file_entries::table
+                .inner_join(drive_entries::table.inner_join(file_categories::table))
+                .select((
+                    file_categories::name,
+                    drive_entries::name,
+                    drive_entries::available_space,
+                    drive_entries::insertion_time,
+                    file_entries::path,
+                    file_entries::weight,
+                ))
+                .into_boxed();
 
-                let mut query = file_entries::table
-                    .inner_join(drive_entries::table.inner_join(file_categories::table))
-                    .select((
-                        file_categories::name,
-                        drive_entries::name,
-                        drive_entries::available_space,
-                        drive_entries::insertion_time,
-                        file_entries::path,
-                        file_entries::weight,
-                    ))
-                    .into_boxed();
+            // Conditionally add drive filter
+            if let Some(drive) = &selected_drive {
+                query = query.filter(drive_entries::name.eq(drive));
+            }
 
-                // Conditionally add drive filter
-                if let Some(drive) = &selected_drive {
-                    query = query.filter(drive_entries::name.eq(drive));
-                }
+            // Apply search pattern filter
+            if let Some(search) = &search_pattern {
+                query = query.filter(file_entries::path.like(search));
+            }
 
-                // Apply search pattern filter
-                if let Some(search) = &search_pattern {
-                    query = query.filter(file_entries::path.like(search));
-                }
+            let entities = query
+                .limit(limit)
+                .offset(offset)
+                .load::<FileWithMetadataDto>(conn)?;
 
-                let entities = query
-                    .limit(limit)
-                    .offset(offset)
-                    .load::<FileWithMetadataDto>(&mut conn)?;
+            let items = entities
+                .into_iter()
+                .map(|dto| FileWithMetadata {
+                    category_name: dto.category_name,
+                    drive_name: dto.drive_name,
+                    drive_available_space: dto.drive_available_space,
+                    drive_insertion_time: dto.drive_insertion_time,
+                    path: dto.path,
+                    size_bytes: dto.weight,
+                })
+                .collect();
 
-                let items = entities
-                    .into_iter()
-                    .map(|dto| FileWithMetadata {
-                        category_name: dto.category_name,
-                        drive_name: dto.drive_name,
-                        drive_available_space: dto.drive_available_space,
-                        drive_insertion_time: dto.drive_insertion_time,
-                        path: dto.path,
-                        size_bytes: dto.weight,
-                    })
-                    .collect();
-
-                Ok(PaginatedResult { items, total_count })
-            })
-            .await?
+            Ok(PaginatedResult { items, total_count })
+        }).await
     }
 
     async fn count_search_results(
@@ -255,17 +258,12 @@ impl FileQueryRepository for SqliteFileRepository {
         selected_drive: &Option<String>,
         query: &Option<String>,
     ) -> Result<i64, RepositoryError> {
-        let pool = self.pool.clone();
         let selected_drive = selected_drive.clone();
         let search_pattern = Self::search_pattern(query);
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
-                let count = Self::count(&selected_drive, &search_pattern, &mut conn)?;
-                Ok(count)
-            })
-            .await?
+        
+        self.execute_db_operation(move |conn| {
+            Self::count(&selected_drive, &search_pattern, conn)
+        }).await
     }
 }
 
@@ -276,17 +274,11 @@ impl FileCommandRepository for SqliteFileRepository {
         category: Category,
         drive: DriveToDelete,
     ) -> Result<(), RepositoryError> {
-        let pool = self.pool.clone();
-
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
-                conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
-                    Self::remove_duplicates(category.name, drive.name, conn)
-                })
+        self.execute_db_operation(move |conn| {
+            conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
+                Self::remove_duplicates(category.name, drive.name, conn)
             })
-            .await?
+        }).await
     }
 
     async fn save(
@@ -295,22 +287,15 @@ impl FileCommandRepository for SqliteFileRepository {
         drive: Drive,
         files: Vec<FileEntry>,
     ) -> Result<usize, RepositoryError> {
-        let pool = self.pool.clone();
         let category_name = category.name;
-
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get()?;
-                conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
-                    let category_id = Self::save_category(category_name, conn)?;
-
-                    let drive_id = Self::save_drive(drive, category_id, conn)?;
-
-                    Self::save_files(files, drive_id, conn)
-                })
+        
+        self.execute_db_operation(move |conn| {
+            conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
+                let category_id = Self::save_category(category_name, conn)?;
+                let drive_id = Self::save_drive(drive, category_id, conn)?;
+                Self::save_files(files, drive_id, conn)
             })
-            .await?
+        }).await
     }
 }
 
