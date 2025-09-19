@@ -21,7 +21,6 @@
   "no_directory_selected": "No directory selected",
   "selected_directory": "Selected: {dir}",
   "browse_directory": "Browse Directory",
-  "drive_already_exists": "This category/drive group has already been indexed in the database and will be replaced during the next indexing.",
   "start_indexing": "Start Indexing",
   "fill_all_fields": "Please fill in all fields to start indexing.",
   "clean_status": "[CLEAN] Cleaning database",

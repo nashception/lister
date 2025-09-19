@@ -5,7 +5,6 @@ use crate::domain::entities::file_entry::FileEntry;
 pub enum WriteMessage {
     DirectoryPressed,
     DirectoryChanged(Option<DirectoryData>),
-    DriveAlreadyExistChecked(bool),
     CategoryChanged(String),
     DiskChanged(String),
     DatabaseCleaned,
