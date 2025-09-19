@@ -20,7 +20,6 @@
   "directory_label": "Répertoire",
   "no_directory_selected": "Aucun répertoire sélectionné",
   "selected_directory": "Sélectionné : {dir}",
-  "drive_already_exists": "Ce groupe catégorie/lecteur est déjà indexé dans la base de données. Son contenu sera écrasé lors de la prochaine indexation.",
   "browse_directory": "Parcourir le répertoire",
   "start_indexing": "Commencer l'indexation",
   "fill_all_fields": "Veuillez remplir tous les champs pour démarrer l'indexation.",

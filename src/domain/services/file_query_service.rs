@@ -71,12 +71,4 @@ impl FileQueryUseCase for FileQueryService {
                 .map_err(DomainError::Repository)
         }
     }
-
-    async fn drive_already_exists(&self, category: &String, drive: &String) -> Result<bool, DomainError> {
-        let count = self
-            .query_repo
-            .drive_already_exists(category, drive)
-            .await?;
-        Ok(count)
-    }
 }
