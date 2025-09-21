@@ -238,11 +238,11 @@ impl FileQueryRepository for SqliteFileRepository {
             }
 
             let entities = query
-                .limit(limit)
-                .offset(offset)
+                // .limit(limit)
+                // .offset(offset)
                 .load::<FileWithMetadataDto>(conn)?;
 
-            let items = entities
+            let items: Vec<FileWithMetadata> = entities
                 .into_iter()
                 .map(|dto| FileWithMetadata {
                     category_name: dto.category_name,
@@ -254,9 +254,16 @@ impl FileQueryRepository for SqliteFileRepository {
                 })
                 .collect();
 
+            use humansize::{format_size, DECIMAL};
+            use std::fs::File;
+            use std::io::Write;
+            let mut file = File::create("output.txt").unwrap();
+            items
+                .iter()
+                .for_each(|item| writeln!(file, "{}|{}|{}|{}", item.drive_name, item.category_name, item.path, format_size(item.size_bytes as u64, DECIMAL)).unwrap());
+
             Ok(items)
-        })
-        .await
+        }).await
     }
 }
 
