@@ -1,12 +1,3 @@
-use crate::tr;
-use crate::ui::messages::write_message::WriteMessage;
-use crate::ui::utils::translation::tr_impl;
-use iced::widget::{button, text};
-use iced::widget::column;
-use iced::Element;
-use iced_aw::spinner::Spinner;
-use std::collections::HashMap;
-
 #[derive(PartialEq)]
 pub enum IndexingState {
     Ready,
@@ -16,66 +7,11 @@ pub enum IndexingState {
     Completed { files_indexed: usize },
 }
 
-pub fn indexing_spinner<'a>(state: &IndexingState) -> Element<'a, WriteMessage> {
-    if matches!(
-        state,
-        IndexingState::CleaningDatabase | IndexingState::Scanning | IndexingState::Saving
-    ) {
-        Spinner::new().into()
-    } else {
-        text("").into()
+impl IndexingState {
+    pub fn is_indexing(&self) -> bool {
+        matches!(
+            self,
+            IndexingState::CleaningDatabase | IndexingState::Scanning | IndexingState::Saving
+        )
     }
-}
-
-pub fn indexing_state<'a>(
-    state: &IndexingState,
-    translations: &HashMap<String, String>,
-) -> Element<'a, WriteMessage> {
-    match state {
-        IndexingState::Ready => column![],
-        IndexingState::CleaningDatabase => column![
-            text(tr!(translations, "clean_status"))
-                .size(18)
-                .style(text::primary),
-            text(tr!(translations, "clean_details"))
-                .style(text::secondary)
-                .size(14),
-        ]
-        .spacing(10),
-        IndexingState::Scanning => column![
-            text(tr!(translations, "scan_status"))
-                .size(18)
-                .style(text::primary),
-            text(tr!(translations, "scan_details"))
-                .style(text::secondary)
-                .size(14),
-        ]
-        .spacing(10),
-        IndexingState::Saving => column![
-            text(tr!(translations, "save_status"))
-                .size(18)
-                .style(text::primary),
-            text(tr!(translations, "save_details"))
-                .style(text::secondary)
-                .size(14),
-        ]
-        .spacing(10),
-        IndexingState::Completed { files_indexed } => column![
-            iced::widget::column![
-                text(tr!(translations, "done_status"))
-                    .size(18)
-                    .style(text::success),
-                text(tr!(translations, "done_details", "nb_files" => &files_indexed.to_string()))
-                    .style(text::success)
-                    .size(14),
-                button(text(tr!(translations, "start_new_indexing")))
-                    .on_press(WriteMessage::ResetForm)
-                    .padding(10)
-                    .style(button::secondary),
-            ]
-            .spacing(10),
-        ]
-        .spacing(15),
-    }
-    .into()
 }

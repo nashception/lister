@@ -1,3 +1,3 @@
-pub mod sqlite_repository;
-pub mod schema;
 pub mod entities;
+pub mod schema;
+pub mod sqlite_repository;

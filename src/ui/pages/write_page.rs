@@ -2,12 +2,13 @@ use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
 use crate::tr;
-use crate::ui::components::write::indexing::{indexing_spinner, indexing_state, IndexingState};
+use crate::ui::components::write::indexing::IndexingState;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
-use iced::widget::{button, column, row, text, text_input, Rule};
+use iced::widget::{button, column, container, row, text, text_input, Rule};
 use iced::{Alignment, Element, Length, Task};
+use iced_aw::Spinner;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -54,17 +55,12 @@ impl WritePage {
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, WriteMessage> {
         let form_section = self.form_section(translations);
         let action_section = self.action_section(translations);
-        let spinner = indexing_spinner(&self.state);
-        let status_section = indexing_state(&self.state, translations);
+        let status_section = self.indexing_state(translations);
 
-        column![
-            form_section,
-            action_section,
-            row![spinner, status_section].spacing(10)
-        ]
-        .spacing(20)
-        .padding(20)
-        .into()
+        column![form_section, action_section, status_section]
+            .spacing(20)
+            .padding(20)
+            .into()
     }
 
     pub fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
@@ -160,7 +156,8 @@ impl WritePage {
                 .style(text::success)
         } else {
             text(tr!(translations, "no_directory_selected")).style(text::secondary)
-        };
+        }
+        .width(Length::Fill);
 
         let browse_button = button(text(tr!(translations, "browse_directory")))
             .on_press(WriteMessage::DirectoryPressed)
@@ -181,33 +178,103 @@ impl WritePage {
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
-        let can_submit = self.write_data.is_complete() && self.state == IndexingState::Ready;
+        let submit_button = self.submit_button(translations);
 
-        let submit_button = button(text(tr!(translations, "start_indexing")))
-            .on_press_maybe(if can_submit {
-                Some(WriteMessage::WriteSubmit)
-            } else {
-                None
-            })
-            .padding(15)
-            .width(Length::Fill)
-            .style(if can_submit {
-                button::primary
-            } else {
-                button::text
-            });
-
-        let requirements_text = if !(!self.write_data.is_complete()) {
-            text(tr!(translations, "fill_all_fields"))
-                .style(text::secondary)
-                .size(12)
+        let requirements_text = if !self.write_data.is_complete() {
+            text(tr!(translations, "fill_all_fields")).style(text::danger)
         } else {
             text("")
-        };
+        }
+        .width(Length::Fill);
 
-        column![Rule::horizontal(1), submit_button, requirements_text,]
+        column![Rule::horizontal(1), row![requirements_text, submit_button]]
             .spacing(10)
             .into()
+    }
+
+    fn submit_button(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, WriteMessage> {
+        if self.state.is_indexing() {
+            container(
+                Spinner::new()
+                    .height(Length::from(45))
+                    .width(Length::from(45)),
+            )
+            .padding(5)
+            .into()
+        } else {
+            let can_submit =  self.write_data.is_complete() && self.state == IndexingState::Ready;
+            button(text(tr!(translations, "start_indexing")))
+                .on_press_maybe(if can_submit {
+                    Some(WriteMessage::WriteSubmit)
+                } else {
+                    None
+                })
+                .padding(15)
+                .style(if can_submit {
+                    button::primary
+                } else {
+                    button::text
+                })
+                .into()
+        }
+    }
+
+    fn indexing_state<'a>(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, WriteMessage> {
+        match self.state {
+            IndexingState::Ready => column![],
+            IndexingState::CleaningDatabase => column![
+                text(tr!(translations, "clean_status"))
+                    .size(18)
+                    .style(text::primary),
+                text(tr!(translations, "clean_details"))
+                    .style(text::secondary)
+                    .size(14),
+            ]
+            .spacing(10),
+            IndexingState::Scanning => column![
+                text(tr!(translations, "scan_status"))
+                    .size(18)
+                    .style(text::primary),
+                text(tr!(translations, "scan_details"))
+                    .style(text::secondary)
+                    .size(14),
+            ]
+            .spacing(10),
+            IndexingState::Saving => column![
+                text(tr!(translations, "save_status"))
+                    .size(18)
+                    .style(text::primary),
+                text(tr!(translations, "save_details"))
+                    .style(text::secondary)
+                    .size(14),
+            ]
+            .spacing(10),
+            IndexingState::Completed { files_indexed } => {
+                column![
+                    iced::widget::column![
+                text(tr!(translations, "done_status"))
+                    .size(18)
+                    .style(text::success),
+                text(tr!(translations, "done_details", "nb_files" => &files_indexed.to_string()))
+                    .style(text::success)
+                    .size(14),
+                button(text(tr!(translations, "start_new_indexing")))
+                    .on_press(WriteMessage::ResetForm)
+                    .padding(10)
+                    .style(button::secondary),
+            ]
+                    .spacing(10),
+                ]
+                .spacing(15)
+            }
+        }
+        .into()
     }
 
     fn clean_database(&mut self) -> Task<WriteMessage> {
