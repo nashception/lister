@@ -1,5 +1,4 @@
-use crate::config::constants::CACHED_SIZE;
-use crate::domain::entities::pagination::PaginatedResult;
+use crate::domain::entities::file_entry::FileWithMetadata;
 use crate::domain::errors::domain_error::DomainError;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::domain::ports::secondary::repositories::FileQueryRepository;
@@ -40,35 +39,13 @@ impl FileQueryUseCase for FileQueryService {
         query: &Option<String>,
         page: usize,
         page_size: usize,
-    ) -> Result<PaginatedResult, DomainError> {
+    ) -> Result<Vec<FileWithMetadata>, DomainError> {
         let offset = (page * page_size) as i64;
         let limit = page_size as i64;
 
-        // Optimize small result sets by caching
-        let count = self
-            .query_repo
-            .count_search_results(selected_drive, query)
-            .await?;
-        if count <= CACHED_SIZE {
-            self.query_repo
-                .search_files_paginated(selected_drive, query, 0, count)
-                .await
-                .map(|mut result| {
-                    let start = offset as usize;
-                    let end = (start + page_size).min(result.items.len());
-                    result.items = if start < result.items.len() {
-                        result.items[start..end].to_vec()
-                    } else {
-                        Vec::new()
-                    };
-                    result
-                })
-                .map_err(DomainError::Repository)
-        } else {
-            self.query_repo
-                .search_files_paginated(selected_drive, query, offset, limit)
-                .await
-                .map_err(DomainError::Repository)
-        }
+        self.query_repo
+            .search_files_paginated(selected_drive, query, offset, limit)
+            .await
+            .map_err(DomainError::Repository)
     }
 }

@@ -8,7 +8,7 @@ use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;
-use iced::widget::{button, row, text, Row, Space};
+use iced::widget::{button, column, row, text, Space};
 use iced::window::{icon, Icon, Settings};
 use iced::{keyboard, widget, Alignment, Element, Length, Subscription, Task};
 use std::collections::HashMap;
@@ -65,11 +65,13 @@ impl ListerApp {
         let nav_bar = self.nav_bar();
 
         let content = match &self.current_page {
-            Page::Read(page) => page.view(&self.translations, &self.current_language).map(AppMessage::Read),
+            Page::Read(page) => page
+                .view(&self.translations, &self.current_language)
+                .map(AppMessage::Read),
             Page::Write(page) => page.view(&self.translations).map(AppMessage::Write),
         };
 
-        iced::widget::column![language_toggle, Space::with_height(10), nav_bar, content]
+        column![language_toggle, Space::with_height(10), nav_bar, content]
             .padding(20)
             .into()
     }
@@ -158,7 +160,7 @@ impl ListerApp {
             .ok()
     }
 
-    fn nav_bar(&'_ self) -> Row<'_, AppMessage> {
+    fn nav_bar(&'_ self) -> Element<'_, AppMessage> {
         row![
             button(text(tr!(&self.translations, "read_page")).align_x(Alignment::Center))
                 .on_press(AppMessage::GoToRead)
@@ -176,9 +178,10 @@ impl ListerApp {
                 .width(Length::Fill)
         ]
         .spacing(10)
+        .into()
     }
 
-    fn language_toggle(&'_ self) -> Row<'_, AppMessage> {
+    fn language_toggle(&'_ self) -> Element<'_, AppMessage> {
         let label = match self.current_language.code() {
             "fr" => "FR",
             _ => "EN",
@@ -187,7 +190,9 @@ impl ListerApp {
         let toggle_button = button(text(label))
             .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()));
 
-        row![Space::with_width(Length::Fill), toggle_button].width(Length::Fill)
+        row![Space::with_width(Length::Fill), toggle_button]
+            .width(Length::Fill)
+            .into()
     }
 
     fn change_language(&mut self, language: Language) -> Task<AppMessage> {

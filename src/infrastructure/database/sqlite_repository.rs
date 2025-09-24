@@ -3,7 +3,6 @@ use crate::domain::entities::category::Category;
 use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::{FileEntry, FileWithMetadata};
 use crate::domain::entities::language::Language;
-use crate::domain::entities::pagination::PaginatedResult;
 use crate::domain::errors::repository_error::RepositoryError;
 use crate::domain::ports::secondary::repositories::{
     FileCommandRepository, FileQueryRepository, LanguageRepository,
@@ -156,27 +155,6 @@ impl SqliteFileRepository {
         Ok(insert_count)
     }
 
-    fn count(
-        selected_drive: &Option<String>,
-        search_pattern: &Option<String>,
-        conn: &mut DieselConnection,
-    ) -> Result<i64, RepositoryError> {
-        let mut query = file_entries::table
-            .inner_join(drive_entries::table)
-            .into_boxed();
-
-        if let Some(drive) = selected_drive {
-            query = query.filter(drive_entries::name.eq(drive));
-        }
-
-        if let Some(pattern) = search_pattern {
-            query = query.filter(file_entries::path.like(pattern));
-        }
-
-        let count: i64 = query.count().get_result(conn)?;
-        Ok(count)
-    }
-
     fn search_pattern(query: &Option<String>) -> Option<String> {
         query
             .clone()
@@ -194,7 +172,35 @@ impl FileQueryRepository for SqliteFileRepository {
                 .order(drive_entries::name)
                 .load::<String>(conn)?;
             Ok(drives)
-        }).await
+        })
+        .await
+    }
+
+    async fn count_search_results(
+        &self,
+        selected_drive: &Option<String>,
+        query: &Option<String>,
+    ) -> Result<i64, RepositoryError> {
+        let selected_drive = selected_drive.clone();
+        let search_pattern = Self::search_pattern(query);
+
+        self.execute_db_operation(move |conn| {
+            let mut query1 = file_entries::table
+                .inner_join(drive_entries::table)
+                .into_boxed();
+
+            if let Some(drive) = &selected_drive {
+                query1 = query1.filter(drive_entries::name.eq(drive));
+            }
+
+            if let Some(pattern) = &search_pattern {
+                query1 = query1.filter(file_entries::path.like(pattern));
+            }
+
+            let count = query1.count().get_result(conn)?;
+            Ok(count)
+        })
+            .await
     }
 
     async fn search_files_paginated(
@@ -203,13 +209,11 @@ impl FileQueryRepository for SqliteFileRepository {
         query: &Option<String>,
         offset: i64,
         limit: i64,
-    ) -> Result<PaginatedResult, RepositoryError> {
+    ) -> Result<Vec<FileWithMetadata>, RepositoryError> {
         let selected_drive = selected_drive.clone();
         let search_pattern = Self::search_pattern(query);
-        
-        self.execute_db_operation(move |conn| {
-            let total_count = Self::count(&selected_drive, &search_pattern, conn)?;
 
+        self.execute_db_operation(move |conn| {
             let mut query = file_entries::table
                 .inner_join(drive_entries::table.inner_join(file_categories::table))
                 .select((
@@ -249,21 +253,9 @@ impl FileQueryRepository for SqliteFileRepository {
                 })
                 .collect();
 
-            Ok(PaginatedResult { items, total_count })
-        }).await
-    }
-
-    async fn count_search_results(
-        &self,
-        selected_drive: &Option<String>,
-        query: &Option<String>,
-    ) -> Result<i64, RepositoryError> {
-        let selected_drive = selected_drive.clone();
-        let search_pattern = Self::search_pattern(query);
-        
-        self.execute_db_operation(move |conn| {
-            Self::count(&selected_drive, &search_pattern, conn)
-        }).await
+            Ok(items)
+        })
+        .await
     }
 }
 
@@ -278,7 +270,8 @@ impl FileCommandRepository for SqliteFileRepository {
             conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
                 Self::remove_duplicates(category.name, drive.name, conn)
             })
-        }).await
+        })
+        .await
     }
 
     async fn save(
@@ -288,14 +281,15 @@ impl FileCommandRepository for SqliteFileRepository {
         files: Vec<FileEntry>,
     ) -> Result<usize, RepositoryError> {
         let category_name = category.name;
-        
+
         self.execute_db_operation(move |conn| {
             conn.immediate_transaction::<_, RepositoryError, _>(|conn| {
                 let category_id = Self::save_category(category_name, conn)?;
                 let drive_id = Self::save_drive(drive, category_id, conn)?;
                 Self::save_files(files, drive_id, conn)
             })
-        }).await
+        })
+        .await
     }
 }
 

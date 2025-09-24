@@ -1,4 +1,4 @@
-use crate::domain::entities::pagination::PaginatedResult;
+use crate::domain::entities::file_entry::FileWithMetadata;
 use crate::domain::errors::domain_error::DomainError;
 
 #[async_trait::async_trait]
@@ -17,5 +17,5 @@ pub trait FileQueryUseCase: Send + Sync {
         query: &Option<String>,
         page: usize,
         page_size: usize,
-    ) -> Result<PaginatedResult, DomainError>;
+    ) -> Result<Vec<FileWithMetadata>, DomainError>;
 }
