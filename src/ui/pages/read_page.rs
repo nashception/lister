@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
 use crate::domain::entities::file_entry::FileWithMetadata;
+use crate::domain::entities::language::Language;
 use crate::domain::entities::pagination::PaginatedResult;
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
@@ -17,7 +18,6 @@ use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::widget::{column, row};
 use iced::{keyboard, Element, Subscription, Task};
-use crate::domain::entities::language::Language;
 
 pub struct ReadPage {
     query_use_case: Arc<dyn FileQueryUseCase>,
@@ -49,7 +49,11 @@ impl ReadPage {
         tr!(translations, "read_page_title")
     }
 
-    pub fn view(&'_ self, translations: &HashMap<String, String>, language: &Language) -> Element<'_, ReadMessage> {
+    pub fn view(
+        &'_ self,
+        translations: &HashMap<String, String>,
+        language: &Language,
+    ) -> Element<'_, ReadMessage> {
         let drive_combo_box = self.drive_combo_box.view(translations);
         let search_section = self.search.view(translations);
         let files = self.file_list.view(language);
@@ -181,29 +185,27 @@ impl ReadPage {
                     .get_search_count(&selected_drive, &search_query)
                     .await
                     .unwrap_or(0);
-                if count <= CACHED_SIZE {
-                    let full = query_use_case
+                let files = if count <= CACHED_SIZE {
+                    query_use_case
                         .search_files(&selected_drive, &search_query, 0, count as usize)
-                        .await;
-                    return full.unwrap_or_else(|err| {
-                        popup_error(err);
-                        PaginatedResult {
-                            items: vec![],
-                            total_count: 0,
-                        }
-                    });
+                        .await
+                        .unwrap_or_else(|err| {
+                            popup_error(err);
+                            vec![]
+                        })
+                } else {
+                    query_use_case
+                        .search_files(&selected_drive, &search_query, page, ipp)
+                        .await
+                        .unwrap_or_else(|err| {
+                            popup_error(err);
+                            vec![]
+                        })
+                };
+                PaginatedResult {
+                    items: files,
+                    total_count: count,
                 }
-
-                query_use_case
-                    .search_files(&selected_drive, &search_query, page, ipp)
-                    .await
-                    .unwrap_or_else(|err| {
-                        popup_error(err);
-                        PaginatedResult {
-                            items: vec![],
-                            total_count: 0,
-                        }
-                    })
             },
             ReadMessage::FilesLoaded,
         )
@@ -332,16 +334,17 @@ impl ReadPage {
 
         Task::perform(
             async move {
-                query_use_case
+                let files = query_use_case
                     .search_files(&selected_drive, &search_query, 0, total)
                     .await
                     .unwrap_or_else(|error| {
                         popup_error(error);
-                        PaginatedResult {
-                            items: vec![],
-                            total_count: 0,
-                        }
-                    })
+                        vec![]
+                    });
+                PaginatedResult {
+                    items: files,
+                    total_count: total as i64,
+                }
             },
             ReadMessage::FilesLoaded,
         )

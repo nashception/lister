@@ -9,7 +9,7 @@ pub struct DirectoryData {
 
 impl DirectoryData {
 
-    pub fn file_name(&self) -> String {
+    pub fn last_folder_name(&self) -> String {
         self.directory
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())

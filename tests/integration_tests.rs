@@ -90,12 +90,11 @@ async fn test_complete_file_indexing_workflow() {
         .await;
     assert!(query_result.is_ok());
 
-    let paginated = query_result.unwrap();
-    assert_eq!(paginated.total_count, 4);
-    assert_eq!(paginated.items.len(), 4);
+    let actual = query_result.unwrap();
+    assert_eq!(actual.len(), 4);
 
     // Verify file metadata
-    let first_file = &paginated.items[0];
+    let first_file = &actual[0];
     assert_eq!(first_file.category_name, "Work");
     assert_eq!(first_file.drive_name, "Laptop");
     assert_eq!(first_file.drive_available_space, 1024);
@@ -133,7 +132,7 @@ async fn test_duplicate_removal_workflow() {
         .search_files(&None, &None, 0, 10)
         .await
         .unwrap();
-    assert_eq!(query_result.total_count, 0);
+    assert_eq!(query_result.len(), 0);
 
     // Index again after removal
     fixture
@@ -147,7 +146,7 @@ async fn test_duplicate_removal_workflow() {
         .search_files(&None, &None, 0, 10)
         .await
         .unwrap();
-    assert_eq!(final_result.total_count, 4);
+    assert_eq!(final_result.len(), 4);
 }
 
 #[tokio::test]
@@ -168,8 +167,8 @@ async fn test_file_search_functionality() {
         .search_files(&None, &Some(String::from(".pdf")), 0, 10)
         .await
         .unwrap();
-    assert_eq!(pdf_results.total_count, 2);
-    assert!(pdf_results.items.iter().all(|f| f.path.contains(".pdf")));
+    assert_eq!(pdf_results.len(), 2);
+    assert!(pdf_results.iter().all(|f| f.path.contains(".pdf")));
 
     // Test search by directory
     let doc_results = fixture
@@ -177,13 +176,8 @@ async fn test_file_search_functionality() {
         .search_files(&None, &Some(String::from("documents")), 0, 10)
         .await
         .unwrap();
-    assert_eq!(doc_results.total_count, 2);
-    assert!(
-        doc_results
-            .items
-            .iter()
-            .all(|f| f.path.contains("documents"))
-    );
+    assert_eq!(doc_results.len(), 2);
+    assert!(doc_results.iter().all(|f| f.path.contains("documents")));
 
     // Test search by filename
     let main_results = fixture
@@ -191,8 +185,8 @@ async fn test_file_search_functionality() {
         .search_files(&None, &Some(String::from("main")), 0, 10)
         .await
         .unwrap();
-    assert_eq!(main_results.total_count, 1);
-    assert_eq!(main_results.items[0].path, "code/main.rs");
+    assert_eq!(main_results.len(), 1);
+    assert_eq!(main_results[0].path, "code/main.rs");
 
     // Test empty search returns all files
     let all_results = fixture
@@ -200,7 +194,7 @@ async fn test_file_search_functionality() {
         .search_files(&None, &Some(String::from("")), 0, 10)
         .await
         .unwrap();
-    assert_eq!(all_results.total_count, 4);
+    assert_eq!(all_results.len(), 4);
 }
 
 #[tokio::test]
@@ -243,39 +237,24 @@ async fn test_selected_drive_basic_functionality() {
         .search_files(&Some("Laptop".to_string()), &None, 0, 20)
         .await
         .unwrap();
-    assert_eq!(laptop_results.total_count, 4);
-    assert!(
-        laptop_results
-            .items
-            .iter()
-            .all(|f| f.drive_name == "Laptop")
-    );
+    assert_eq!(laptop_results.len(), 4);
+    assert!(laptop_results.iter().all(|f| f.drive_name == "Laptop"));
 
     let desktop_results = fixture
         .query_service
         .search_files(&Some("Desktop".to_string()), &None, 0, 20)
         .await
         .unwrap();
-    assert_eq!(desktop_results.total_count, 4);
-    assert!(
-        desktop_results
-            .items
-            .iter()
-            .all(|f| f.drive_name == "Desktop")
-    );
+    assert_eq!(desktop_results.len(), 4);
+    assert!(desktop_results.iter().all(|f| f.drive_name == "Desktop"));
 
     let server_results = fixture
         .query_service
         .search_files(&Some("Server".to_string()), &None, 0, 20)
         .await
         .unwrap();
-    assert_eq!(server_results.total_count, 4);
-    assert!(
-        server_results
-            .items
-            .iter()
-            .all(|f| f.drive_name == "Server")
-    );
+    assert_eq!(server_results.len(), 4);
+    assert!(server_results.iter().all(|f| f.drive_name == "Server"));
 
     // Test no drive selection (should return all)
     let all_results = fixture
@@ -283,7 +262,7 @@ async fn test_selected_drive_basic_functionality() {
         .search_files(&None, &None, 0, 20)
         .await
         .unwrap();
-    assert_eq!(all_results.total_count, 12); // 4 files × 3 drives
+    assert_eq!(all_results.len(), 12); // 4 files × 3 drives
 }
 
 #[tokio::test]
@@ -320,10 +299,9 @@ async fn test_selected_drive_with_search_query() {
         )
         .await
         .unwrap();
-    assert_eq!(laptop_pdf_results.total_count, 2);
+    assert_eq!(laptop_pdf_results.len(), 2);
     assert!(
         laptop_pdf_results
-            .items
             .iter()
             .all(|f| f.drive_name == "Laptop" && f.path.contains(".pdf"))
     );
@@ -338,10 +316,9 @@ async fn test_selected_drive_with_search_query() {
         )
         .await
         .unwrap();
-    assert_eq!(desktop_pdf_results.total_count, 2);
+    assert_eq!(desktop_pdf_results.len(), 2);
     assert!(
         desktop_pdf_results
-            .items
             .iter()
             .all(|f| f.drive_name == "Desktop" && f.path.contains(".pdf"))
     );
@@ -352,7 +329,7 @@ async fn test_selected_drive_with_search_query() {
         .search_files(&None, &Some(".pdf".to_string()), 0, 10)
         .await
         .unwrap();
-    assert_eq!(all_pdf_results.total_count, 4); // 2 PDFs × 2 drives
+    assert_eq!(all_pdf_results.len(), 4); // 2 PDFs × 2 drives
 
     // Test drive selection with search query that has no matches
     let laptop_nonexistent_results = fixture
@@ -365,7 +342,7 @@ async fn test_selected_drive_with_search_query() {
         )
         .await
         .unwrap();
-    assert_eq!(laptop_nonexistent_results.total_count, 0);
+    assert_eq!(laptop_nonexistent_results.len(), 0);
 }
 
 #[tokio::test]
@@ -386,8 +363,8 @@ async fn test_selected_drive_nonexistent_drive() {
         .search_files(&Some("NonexistentDrive".to_string()), &None, 0, 10)
         .await
         .unwrap();
-    assert_eq!(nonexistent_results.total_count, 0);
-    assert_eq!(nonexistent_results.items.len(), 0);
+    assert_eq!(nonexistent_results.len(), 0);
+    assert_eq!(nonexistent_results.len(), 0);
 
     // Test selecting a nonexistent drive with search query
     let nonexistent_with_query = fixture
@@ -400,8 +377,8 @@ async fn test_selected_drive_nonexistent_drive() {
         )
         .await
         .unwrap();
-    assert_eq!(nonexistent_with_query.total_count, 0);
-    assert_eq!(nonexistent_with_query.items.len(), 0);
+    assert_eq!(nonexistent_with_query.len(), 0);
+    assert_eq!(nonexistent_with_query.len(), 0);
 }
 
 #[tokio::test]
@@ -441,18 +418,32 @@ async fn test_selected_drive_with_pagination() {
         .search_files(&Some("Drive1".to_string()), &None, 0, 100)
         .await
         .unwrap();
-    assert_eq!(drive1_page0.items.len(), 100);
-    assert_eq!(drive1_page0.total_count, 150);
-    assert!(drive1_page0.items.iter().all(|f| f.drive_name == "Drive1"));
+    assert_eq!(drive1_page0.len(), 100);
+
+    let count = fixture
+        .query_service
+        .get_search_count(&Some("Drive1".to_string()), &None)
+        .await
+        .unwrap();
+
+    assert_eq!(count, 150);
+    assert!(drive1_page0.iter().all(|f| f.drive_name == "Drive1"));
 
     let drive1_page1 = fixture
         .query_service
         .search_files(&Some("Drive1".to_string()), &None, 1, 100)
         .await
         .unwrap();
-    assert_eq!(drive1_page1.items.len(), 50);
-    assert_eq!(drive1_page1.total_count, 150);
-    assert!(drive1_page1.items.iter().all(|f| f.drive_name == "Drive1"));
+    assert_eq!(drive1_page1.len(), 50);
+
+    let count = fixture
+        .query_service
+        .get_search_count(&Some("Drive1".to_string()), &None)
+        .await
+        .unwrap();
+
+    assert_eq!(count, 150);
+    assert!(drive1_page1.iter().all(|f| f.drive_name == "Drive1"));
 
     // Test pagination without drive selection (should see all files)
     let all_page0 = fixture
@@ -460,16 +451,30 @@ async fn test_selected_drive_with_pagination() {
         .search_files(&None, &None, 0, 100)
         .await
         .unwrap();
-    assert_eq!(all_page0.items.len(), 100);
-    assert_eq!(all_page0.total_count, 300); // 150 files × 2 drives
+    assert_eq!(all_page0.len(), 100);
+
+    let count = fixture
+        .query_service
+        .get_search_count(&None, &None)
+        .await
+        .unwrap();
+
+    assert_eq!(count, 300); // 150 files × 2 drives
 
     let all_page2 = fixture
         .query_service
         .search_files(&None, &None, 2, 100)
         .await
         .unwrap();
-    assert_eq!(all_page2.items.len(), 100);
-    assert_eq!(all_page2.total_count, 300);
+    assert_eq!(all_page2.len(), 100);
+
+    let count = fixture
+        .query_service
+        .get_search_count(&None, &None)
+        .await
+        .unwrap();
+
+    assert_eq!(count, 300);
 }
 
 #[tokio::test]
@@ -497,8 +502,7 @@ async fn test_pagination_behavior() {
         .search_files(&None, &None, 0, 100)
         .await
         .unwrap();
-    assert_eq!(page_0.items.len(), 100);
-    assert_eq!(page_0.total_count, 250);
+    assert_eq!(page_0.len(), 100);
 
     // Test second page
     let page_1 = fixture
@@ -506,8 +510,7 @@ async fn test_pagination_behavior() {
         .search_files(&None, &None, 1, 100)
         .await
         .unwrap();
-    assert_eq!(page_1.items.len(), 100);
-    assert_eq!(page_1.total_count, 250);
+    assert_eq!(page_1.len(), 100);
 
     // Test last page
     let page_2 = fixture
@@ -515,8 +518,7 @@ async fn test_pagination_behavior() {
         .search_files(&None, &None, 2, 100)
         .await
         .unwrap();
-    assert_eq!(page_2.items.len(), 50);
-    assert_eq!(page_2.total_count, 250);
+    assert_eq!(page_2.len(), 50);
 
     // Test beyond last page
     let page_3 = fixture
@@ -524,8 +526,15 @@ async fn test_pagination_behavior() {
         .search_files(&None, &None, 3, 100)
         .await
         .unwrap();
-    assert_eq!(page_3.items.len(), 0);
-    assert_eq!(page_3.total_count, 250);
+    assert_eq!(page_3.len(), 0);
+
+    let count = fixture
+        .query_service
+        .get_search_count(&None, &None)
+        .await
+        .unwrap();
+
+    assert_eq!(count, (page_0.len() + page_1.len() + page_2.len() + page_3.len()) as i64);
 }
 
 #[tokio::test]
@@ -539,7 +548,7 @@ async fn test_search_result_count_accuracy() {
         .await
         .expect("Indexing failed");
 
-    // Test that search results total_count is accurate
+    // Test that search results len() is accurate
     let search_query = ".pdf";
     let search_results = fixture
         .query_service
@@ -548,11 +557,11 @@ async fn test_search_result_count_accuracy() {
         .unwrap();
 
     // Should find exactly 2 PDF files
-    assert_eq!(search_results.total_count, 2);
-    assert_eq!(search_results.items.len(), 2);
+    assert_eq!(search_results.len(), 2);
+    assert_eq!(search_results.len(), 2);
 
     // Verify the count matches the actual items returned
-    assert!(search_results.items.iter().all(|f| f.path.contains(".pdf")));
+    assert!(search_results.iter().all(|f| f.path.contains(".pdf")));
 }
 
 #[tokio::test]
@@ -625,23 +634,17 @@ async fn test_multiple_categories_and_drives() {
         .search_files(&None, &None, 0, 20)
         .await
         .unwrap();
-    assert_eq!(all_files.total_count, 12); // 4 files × 3 locations
+    assert_eq!(all_files.len(), 12); // 4 files × 3 locations
 
     // Verify different categories exist
-    let categories: std::collections::HashSet<_> = all_files
-        .items
-        .iter()
-        .map(|f| f.category_name.clone())
-        .collect();
+    let categories: std::collections::HashSet<_> =
+        all_files.iter().map(|f| f.category_name.clone()).collect();
     assert!(categories.contains("Work"));
     assert!(categories.contains("Personal"));
 
     // Verify different drives exist
-    let drives: std::collections::HashSet<_> = all_files
-        .items
-        .iter()
-        .map(|f| f.drive_name.clone())
-        .collect();
+    let drives: std::collections::HashSet<_> =
+        all_files.iter().map(|f| f.drive_name.clone()).collect();
     assert!(drives.contains("Laptop"));
     assert!(drives.contains("Desktop"));
     assert!(drives.contains("Server"));
@@ -675,7 +678,7 @@ async fn test_concurrent_operations() {
     for handle in handles {
         let (_, result) = handle.await.expect("Task failed");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().total_count, 4);
+        assert_eq!(result.unwrap().len(), 4);
     }
 }
 
@@ -689,7 +692,7 @@ async fn test_edge_cases_and_error_handling() {
         .search_files(&None, &Some(String::from("")), 0, 10)
         .await
         .unwrap();
-    assert_eq!(empty_result.total_count, 0);
+    assert_eq!(empty_result.len(), 0);
 
     // Test search with no matches
     let no_matches = fixture
@@ -697,7 +700,7 @@ async fn test_edge_cases_and_error_handling() {
         .search_files(&None, &Some(String::from("nonexistent")), 0, 10)
         .await
         .unwrap();
-    assert_eq!(no_matches.total_count, 0);
+    assert_eq!(no_matches.len(), 0);
 
     // Test pagination with no data
     let no_data = fixture
@@ -705,8 +708,8 @@ async fn test_edge_cases_and_error_handling() {
         .search_files(&None, &None, 5, 10)
         .await
         .unwrap();
-    assert_eq!(no_data.total_count, 0);
-    assert_eq!(no_data.items.len(), 0);
+    assert_eq!(no_data.len(), 0);
+    assert_eq!(no_data.len(), 0);
 
     // Test remove duplicates with no data
     let remove_empty = fixture
@@ -729,7 +732,7 @@ async fn test_edge_cases_and_error_handling() {
         .search_files(&Some("".to_string()), &None, 0, 10)
         .await
         .unwrap();
-    assert_eq!(empty_drive_name.total_count, 0);
+    assert_eq!(empty_drive_name.len(), 0);
 }
 
 // Benchmark test to ensure performance doesn't regress
@@ -779,7 +782,7 @@ async fn test_search_performance_with_large_dataset() {
         "Search took too long: {:?}",
         elapsed
     );
-    assert!(search_result.total_count > 0);
+    assert!(search_result.len() > 0);
 
     // Test pagination performance
     let start = std::time::Instant::now();
@@ -795,5 +798,5 @@ async fn test_search_performance_with_large_dataset() {
         "Pagination took too long: {:?}",
         elapsed
     );
-    assert_eq!(page_result.items.len(), 100);
+    assert_eq!(page_result.len(), 100);
 }

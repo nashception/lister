@@ -75,7 +75,7 @@ impl WritePage {
             WriteMessage::DirectoryChanged(selected_data) => {
                 if let Some(data) = selected_data {
                     self.write_data = WriteData {
-                        category: data.file_name(),
+                        category: data.last_folder_name(),
                         directory: Some(data.directory),
                         drive: data.drive_name,
                         drive_available_space: data.drive_available_space,

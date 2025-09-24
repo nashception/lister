@@ -1,4 +1,4 @@
-use std::fmt::{Display, Result};
+use std::fmt::{Display, Result, Formatter};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Drive {
@@ -12,7 +12,7 @@ pub struct DriveToDelete {
 }
 
 impl Display for Drive {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}", self.name.clone())
     }
 }
