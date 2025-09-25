@@ -7,18 +7,10 @@ pub enum Language {
 impl Language {
     pub fn new(code: &str) -> Self {
         match code.to_lowercase().as_str() {
-            "en" | "english" => Language::English,
-            "fr" | "french" => Language::French,
+            "en" => Language::English,
+            "fr" => Language::French,
             _ => Language::English,
         }
-    }
-
-    pub fn english() -> Self {
-        Language::English
-    }
-
-    pub fn french() -> Self {
-        Language::French
     }
 
     pub fn code(&self) -> &str {

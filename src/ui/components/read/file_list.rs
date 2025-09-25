@@ -1,10 +1,10 @@
 use crate::domain::entities::file_entry::FileWithMetadata;
+use crate::domain::entities::language::Language;
 use crate::ui::messages::read_message::ReadMessage;
+use crate::ui::utils::format_date_time::format_date_time;
 use humansize::{format_size, DECIMAL};
 use iced::widget::{column, row, scrollable, text, Rule};
 use iced::{Element, Length};
-use crate::domain::entities::language::Language;
-use crate::ui::utils::format_date_time::format_date_time;
 
 pub struct FileList {
     pub files: Vec<FileWithMetadata>,
@@ -35,12 +35,13 @@ impl FileList {
                 row![
                     text(&file.category_name).width(Length::FillPortion(1)),
                     text(&file.drive_name).width(Length::FillPortion(2)),
-                    text(format_size(file.drive_available_space as u64, DECIMAL))
+                    text(format_size(file.drive_available_space.as_u64(), DECIMAL))
                         .width(Length::FillPortion(1)),
-                    text(format_date_time(file.drive_insertion_time, language)).width(Length::FillPortion(2)),
+                    text(format_date_time(file.drive_insertion_time, language))
+                        .width(Length::FillPortion(2)),
                     text(file.parent_directory()).width(Length::FillPortion(3)),
                     text(file.filename()).width(Length::FillPortion(4)),
-                    text(format_size(file.size_bytes as u64, DECIMAL))
+                    text(format_size(file.size_bytes.as_u64(), DECIMAL))
                         .width(Length::FillPortion(1))
                 ]
                 .padding(3)

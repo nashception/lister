@@ -8,7 +8,6 @@ pub struct DirectoryData {
 }
 
 impl DirectoryData {
-
     pub fn last_folder_name(&self) -> String {
         self.directory
             .file_name()

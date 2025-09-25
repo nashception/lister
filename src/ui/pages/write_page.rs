@@ -6,7 +6,7 @@ use crate::ui::components::write::indexing::IndexingState;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
-use iced::widget::{button, column, container, row, text, text_input, Rule};
+use iced::widget::{Rule, button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
 use iced_aw::Spinner;
 use std::collections::HashMap;
@@ -205,7 +205,7 @@ impl WritePage {
             .padding(5)
             .into()
         } else {
-            let can_submit =  self.write_data.is_complete() && self.state == IndexingState::Ready;
+            let can_submit = self.write_data.is_complete() && self.state == IndexingState::Ready;
             button(text(tr!(translations, "start_indexing")))
                 .on_press_maybe(if can_submit {
                     Some(WriteMessage::WriteSubmit)
@@ -222,7 +222,7 @@ impl WritePage {
         }
     }
 
-    fn indexing_state<'a>(
+    fn indexing_state(
         &'_ self,
         translations: &HashMap<String, String>,
     ) -> Element<'_, WriteMessage> {
@@ -332,7 +332,7 @@ impl WritePage {
         let indexing_use_case = self.indexing_use_case.clone();
         let category = self.write_data.category.clone();
         let drive = self.write_data.drive.clone();
-        let drive_available_space = self.write_data.drive_available_space.clone();
+        let drive_available_space = self.write_data.drive_available_space;
 
         Task::perform(
             async move {
