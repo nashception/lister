@@ -1,1 +1,1 @@
-pub mod updater;
+pub mod app_updater;

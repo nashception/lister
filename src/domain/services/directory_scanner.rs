@@ -1,12 +1,13 @@
 use crate::config::constants::TOKIO_RUNTIME;
 use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::entities::types::Bytes;
 use crate::domain::errors::scanner_error::DirectoryScannerError;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use walkdir::WalkDir;
 
-pub async fn scan_directory(directory: &PathBuf) -> Result<Vec<FileEntry>, DirectoryScannerError> {
-    let directory = directory.clone();
+pub async fn scan_directory(directory: &Path) -> Result<Vec<FileEntry>, DirectoryScannerError> {
+    let directory = directory.to_path_buf();
 
     TOKIO_RUNTIME
         .handle()
@@ -23,7 +24,7 @@ pub async fn scan_directory(directory: &PathBuf) -> Result<Vec<FileEntry>, Direc
 }
 
 fn extract_file_info(
-    base_directory: &PathBuf,
+    base_directory: &Path,
     file_path: &Path,
 ) -> Result<FileEntry, DirectoryScannerError> {
     Ok(FileEntry {
@@ -39,7 +40,7 @@ fn relative_path(base_directory: &Path, file_path: &Path) -> Result<String, Dire
     Ok(relative_path)
 }
 
-fn file_size(path: &Path) -> Result<i64, DirectoryScannerError> {
-    let file_size = fs::metadata(path).map(|m| m.len() as i64)?;
+fn file_size(path: &Path) -> Result<Bytes, DirectoryScannerError> {
+    let file_size = fs::metadata(path).map(|m| Bytes::from(m.len()))?;
     Ok(file_size)
 }

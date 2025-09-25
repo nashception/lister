@@ -46,7 +46,7 @@ impl ListerAppService {
         let current_language = self
             .language_use_case
             .get_current_language()
-            .unwrap_or_else(|_| Language::english());
+            .unwrap_or(Language::English);
         let translations = self
             .language_use_case
             .load_translations(&current_language)

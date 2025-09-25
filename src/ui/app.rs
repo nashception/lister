@@ -156,7 +156,7 @@ impl ListerApp {
 
     fn lister_icon() -> Option<Icon> {
         icon::from_file_data(include_bytes!("../../assets/icon.png"), None)
-            .map_err(|error| popup_error(error))
+            .map_err(popup_error)
             .ok()
     }
 
@@ -182,9 +182,9 @@ impl ListerApp {
     }
 
     fn language_toggle(&'_ self) -> Element<'_, AppMessage> {
-        let label = match self.current_language.code() {
-            "fr" => "FR",
-            _ => "EN",
+        let label = match self.current_language {
+            Language::English => "EN",
+            Language::French => "FR",
         };
 
         let toggle_button = button(text(label))

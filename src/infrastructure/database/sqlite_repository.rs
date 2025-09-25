@@ -3,6 +3,7 @@ use crate::domain::entities::category::Category;
 use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::{FileEntry, FileWithMetadata};
 use crate::domain::entities::language::Language;
+use crate::domain::entities::types::Bytes;
 use crate::domain::errors::repository_error::RepositoryError;
 use crate::domain::ports::secondary::repositories::{
     FileCommandRepository, FileQueryRepository, LanguageRepository,
@@ -113,7 +114,7 @@ impl SqliteFileRepository {
             .values(NewDriveEntryDto {
                 category_id,
                 name: drive.name.clone(),
-                available_space: drive.available_space,
+                available_space: drive.available_space.0,
                 insertion_time: Local::now().naive_local(),
             })
             .returning(drive_entries::id)
@@ -129,7 +130,7 @@ impl SqliteFileRepository {
         conn: &mut SqliteConnection,
     ) -> Result<(), RepositoryError> {
         update(drive_entries::table.filter(drive_entries::name.eq(drive.name)))
-            .set(drive_entries::available_space.eq(drive.available_space))
+            .set(drive_entries::available_space.eq(drive.available_space.0))
             .execute(conn)?;
         Ok(())
     }
@@ -144,7 +145,7 @@ impl SqliteFileRepository {
             .map(|f| NewFileEntryDto {
                 drive_id,
                 path: f.path,
-                weight: f.size_bytes,
+                weight: f.size_bytes.0,
             })
             .collect();
 
@@ -200,7 +201,7 @@ impl FileQueryRepository for SqliteFileRepository {
             let count = query1.count().get_result(conn)?;
             Ok(count)
         })
-            .await
+        .await
     }
 
     async fn search_files_paginated(
@@ -246,10 +247,10 @@ impl FileQueryRepository for SqliteFileRepository {
                 .map(|dto| FileWithMetadata {
                     category_name: dto.category_name,
                     drive_name: dto.drive_name,
-                    drive_available_space: dto.drive_available_space,
+                    drive_available_space: Bytes(dto.drive_available_space),
                     drive_insertion_time: dto.drive_insertion_time,
                     path: dto.path,
-                    size_bytes: dto.weight,
+                    size_bytes: Bytes(dto.weight),
                 })
                 .collect();
 
@@ -304,7 +305,7 @@ impl LanguageRepository for SqliteFileRepository {
 
         Ok(lang
             .map(|l| Language::new(&l))
-            .unwrap_or_else(Language::english))
+            .unwrap_or_else(|| Language::English))
     }
 
     fn set_language(&self, language: &Language) -> Result<(), RepositoryError> {

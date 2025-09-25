@@ -27,7 +27,7 @@ impl Pagination {
         if self.total_count == 0 {
             1
         } else {
-            ((self.total_count as usize) + self.items_per_page - 1) / self.items_per_page
+            (self.total_count as usize).div_ceil(self.items_per_page)
         }
     }
 

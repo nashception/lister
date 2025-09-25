@@ -1,11 +1,12 @@
 use crate::domain::entities::category::Category;
 use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::entities::types::Bytes;
 use crate::domain::errors::domain_error::DomainError;
 use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use crate::domain::ports::secondary::repositories::FileCommandRepository;
 use crate::domain::services::directory_scanner;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 pub struct FileIndexingService {
@@ -28,7 +29,7 @@ impl FileIndexingUseCase for FileIndexingService {
         Ok(files_count)
     }
 
-    async fn scan_directory(&self, directory: &PathBuf) -> Result<Vec<FileEntry>, DomainError> {
+    async fn scan_directory(&self, directory: &Path) -> Result<Vec<FileEntry>, DomainError> {
         let files = directory_scanner::scan_directory(directory).await?;
         Ok(files)
     }
@@ -46,7 +47,7 @@ impl FileIndexingUseCase for FileIndexingService {
                 Category { name: category },
                 Drive {
                     name: drive,
-                    available_space: drive_available_space,
+                    available_space: Bytes(drive_available_space),
                 },
                 files,
             )

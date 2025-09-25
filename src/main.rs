@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
 
-use lister::infrastructure::updater::updater::self_update;
+use lister::infrastructure::updater::app_updater::self_update;
 use lister::ui::app::ListerApp;
 use lister::ui::app_factory::ListerAppService;
 

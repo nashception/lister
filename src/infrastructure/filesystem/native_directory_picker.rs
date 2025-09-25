@@ -14,7 +14,7 @@ impl DirectoryPicker for NativeDirectoryPicker {
             crate::config::constants::TOKIO_RUNTIME.block_on(Self::directory_picker())
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "windows")]
         {
             // On Windows, can await directly
             Self::directory_picker().await

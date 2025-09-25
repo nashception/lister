@@ -1,3 +1,4 @@
+
 use crate::utils::dialogs::{popup_error, popup_info};
 use self_update::backends::github::Update;
 use std::env;
@@ -6,7 +7,13 @@ use std::path::PathBuf;
 use std::process::{exit, Command};
 
 pub fn self_update() {
-    let exe_path = env::current_exe().expect("Failed to get current exe path");
+    let exe_path = match env::current_exe() {
+        Ok(path) => path,
+        Err(e) => {
+            popup_error(format!("Failed to get current exe path: {}", e));
+            return;
+        }
+    };
     let just_updated = env::args().any(|arg| arg == "--updated");
 
     if !just_updated {
@@ -14,7 +21,9 @@ pub fn self_update() {
             Ok(new_version) => {
                 if !new_version.is_empty() {
                     popup_info(format!("New version has been installed: {}", new_version));
-                    restart(exe_path)
+                    if let Err(e) = restart(exe_path) {
+                        popup_error(format!("Failed to restart: {}", e));
+                    }
                 }
             }
             Err(e) => popup_error(format!("Update failed: {}", e)),
@@ -41,11 +50,10 @@ fn try_update() -> Result<String, Box<dyn Error>> {
     Ok(new_version)
 }
 
-fn restart(exe_path: PathBuf) {
+fn restart(exe_path: PathBuf) -> Result<(), Box<dyn Error>> {
     Command::new(exe_path)
         .arg("--updated")
-        .spawn()
-        .expect("Failed to restart");
+        .spawn()?;
 
     exit(0);
 }

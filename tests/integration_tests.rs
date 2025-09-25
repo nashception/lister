@@ -1,6 +1,7 @@
 use chrono::Local;
 use lister::domain::entities::file_entry::FileEntry;
 use lister::domain::entities::language::Language;
+use lister::domain::entities::types::Bytes;
 use lister::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use lister::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use lister::domain::ports::primary::language_use_case::LanguageManagementUseCase;
@@ -46,19 +47,19 @@ impl TestFixture {
         vec![
             FileEntry {
                 path: "documents/report.pdf".to_string(),
-                size_bytes: 1024,
+                size_bytes: Bytes(1024),
             },
             FileEntry {
                 path: "images/photo.jpg".to_string(),
-                size_bytes: 2048,
+                size_bytes: Bytes(2048),
             },
             FileEntry {
                 path: "code/main.rs".to_string(),
-                size_bytes: 512,
+                size_bytes: Bytes(512),
             },
             FileEntry {
                 path: "documents/invoice.pdf".to_string(),
-                size_bytes: 768,
+                size_bytes: Bytes(768),
             },
         ]
     }
@@ -97,7 +98,7 @@ async fn test_complete_file_indexing_workflow() {
     let first_file = &actual[0];
     assert_eq!(first_file.category_name, "Work");
     assert_eq!(first_file.drive_name, "Laptop");
-    assert_eq!(first_file.drive_available_space, 1024);
+    assert_eq!(first_file.drive_available_space.0, 1024);
     assert!(first_file.drive_insertion_time <= Local::now().naive_local());
     assert!(files.iter().any(|f| f.path == first_file.path));
 }
@@ -390,7 +391,7 @@ async fn test_selected_drive_with_pagination() {
     for i in 0..150 {
         many_files.push(FileEntry {
             path: format!("file_{:03}.txt", i),
-            size_bytes: i as i64 * 10,
+            size_bytes: Bytes(i * 10),
         });
     }
 
@@ -486,7 +487,7 @@ async fn test_pagination_behavior() {
     for i in 0..250 {
         many_files.push(FileEntry {
             path: format!("file_{:03}.txt", i),
-            size_bytes: i as i64 * 10,
+            size_bytes: Bytes(i * 10),
         });
     }
 
@@ -534,7 +535,10 @@ async fn test_pagination_behavior() {
         .await
         .unwrap();
 
-    assert_eq!(count, (page_0.len() + page_1.len() + page_2.len() + page_3.len()) as i64);
+    assert_eq!(
+        count,
+        (page_0.len() + page_1.len() + page_2.len() + page_3.len()) as i64
+    );
 }
 
 #[tokio::test]
@@ -570,17 +574,17 @@ async fn test_language_management_workflow() {
 
     // Test default language
     let default_lang = fixture.language_service.get_current_language().unwrap();
-    assert_eq!(default_lang.code(), "en");
+    assert_eq!(default_lang, Language::English);
 
     // Test language change
-    let french = Language::french();
+    let french = Language::French;
     fixture
         .language_service
         .set_language(french.clone())
         .expect("Failed to set language");
 
     let current_lang = fixture.language_service.get_current_language().unwrap();
-    assert_eq!(current_lang.code(), "fr");
+    assert_eq!(current_lang, Language::French);
 
     // Test translation loading
     let translations = fixture
@@ -591,7 +595,7 @@ async fn test_language_management_workflow() {
 
     // Test language toggle
     let toggled = current_lang.toggle();
-    assert_eq!(toggled.code(), "en");
+    assert_eq!(toggled, Language::English);
 }
 
 #[tokio::test]
@@ -750,7 +754,7 @@ async fn test_search_performance_with_large_dataset() {
                 i % 100,
                 i
             ),
-            size_bytes: i as i64,
+            size_bytes: Bytes(i),
         });
     }
 

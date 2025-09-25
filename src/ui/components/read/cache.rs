@@ -38,13 +38,13 @@ impl Cache {
         page_index: usize,
         items_per_page: usize,
     ) -> Option<Vec<FileWithMetadata>> {
-        if self.is_valid_for(selected_drive, query) {
-            if let Some(results) = &self.results {
-                let start = page_index * items_per_page;
-                if start < results.len() {
-                    let end = (start + items_per_page).min(results.len());
-                    return Some(results[start..end].to_vec());
-                }
+        if self.is_valid_for(selected_drive, query)
+            && let Some(results) = &self.results
+        {
+            let start = page_index * items_per_page;
+            if start < results.len() {
+                let end = (start + items_per_page).min(results.len());
+                return Some(results[start..end].to_vec());
             }
         }
         None
