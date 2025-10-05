@@ -1,4 +1,3 @@
-use crate::ui::utils::translation::tr_impl;
 use std::collections::HashMap;
 use std::sync::Arc;
 

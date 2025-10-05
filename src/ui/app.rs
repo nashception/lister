@@ -4,7 +4,6 @@ use crate::ui::app_factory::ListerAppService;
 use crate::ui::messages::app_message::AppMessage;
 use crate::ui::pages::read_page::ReadPage;
 use crate::ui::pages::write_page::WritePage;
-use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;

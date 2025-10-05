@@ -4,7 +4,6 @@ use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
 use crate::tr;
 use crate::ui::components::write::indexing::IndexingState;
 use crate::ui::messages::write_message::WriteMessage;
-use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
 use iced::widget::{button, column, container, row, text, text_input, Rule};
 use iced::{Alignment, Element, Length, Task};

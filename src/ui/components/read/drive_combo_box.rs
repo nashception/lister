@@ -1,7 +1,6 @@
 use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
 use crate::ui::messages::read_message::ReadMessage;
-use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::popup_error;
 use iced::widget::pick_list;
 use iced::{Element, Task};

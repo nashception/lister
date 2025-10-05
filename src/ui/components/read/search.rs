@@ -1,4 +1,3 @@
-use crate::ui::utils::translation::tr_impl;
 use iced::widget::{button, column, focus_next, row, text, text_input};
 use iced::{Element, Length, Task};
 use std::collections::HashMap;
