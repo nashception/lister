@@ -1,6 +1,6 @@
 [package]
 name = "lister"
-version = "1.2.7"
+version = "1.2.8"
 edition = "2024"
 publish = false
 
@@ -10,16 +10,11 @@ publish = false
 diesel = { version = "2.3", features = ["chrono", "r2d2", "returning_clauses_for_sqlite_3_35", "sqlite"], default-features = false }
 diesel_migrations = { version = "2.3", default-features = false }
 
-# Async
-async-trait = "0.1"
-tokio = { version = "1.47", features = ["rt-multi-thread"], default-features = false }
-
 # GUI
 iced = { version = "0.13", features = ["image", "wgpu", "auto-detect-theme"], default-features = false }
 iced_aw = { version = "0.12", features = ["spinner"], default-features = false }
 
 # File system
-rfd = { version = "0.15", features = ["xdg-portal", "tokio"], default-features = false }
 sysinfo = { version = "0.37", features = ["disk"], default-features = false }
 walkdir = "2.5"
 
@@ -32,12 +27,20 @@ thiserror = { version = "2.0", default-features = false }
 # Update
 self_update = { version = "0.42", features = ["rustls"], default-features = false }
 
-[dev-dependencies]
-tempfile = { version = "3.21", default-features = false }
-tokio = { version = "1.47", features = ["macros"], default-features = false }
+# Linux-specific features
+[target.'cfg(target_os = "linux")'.dependencies]
+rfd = { version = "0.15", features = ["xdg-portal", "tokio"], default-features = false }
+tokio = { version = "1.47", features = ["rt-multi-thread"], default-features = false }
+
+# Windows-specific features
+[target.'cfg(target_os = "windows")'.dependencies]
+rfd = { version = "0.15", default-features = false }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 libsqlite3-sys = { version = "0.35", features = ["bundled"], default-features = false }
+
+[dev-dependencies]
+tempfile = { version = "3.21", default-features = false }
 
 [profile.release]
 lto = true

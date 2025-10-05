@@ -14,26 +14,24 @@ impl FileQueryService {
     }
 }
 
-#[async_trait::async_trait]
 impl FileQueryUseCase for FileQueryService {
-    async fn list_drive_names(&self) -> Result<Vec<String>, DomainError> {
-        let drives = self.query_repo.find_all_drive_names().await?;
+    fn list_drive_names(&self) -> Result<Vec<String>, DomainError> {
+        let drives = self.query_repo.find_all_drive_names()?;
         Ok(drives)
     }
 
-    async fn get_search_count(
+    fn get_search_count(
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
     ) -> Result<i64, DomainError> {
         let count = self
             .query_repo
-            .count_search_results(selected_drive, query)
-            .await?;
+            .count_search_results(selected_drive, query)?;
         Ok(count)
     }
 
-    async fn search_files(
+    fn search_files(
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
@@ -45,7 +43,6 @@ impl FileQueryUseCase for FileQueryService {
 
         self.query_repo
             .search_files_paginated(selected_drive, query, offset, limit)
-            .await
             .map_err(DomainError::Repository)
     }
 }

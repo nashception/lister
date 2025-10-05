@@ -183,12 +183,10 @@ impl ReadPage {
             async move {
                 let count = query_use_case
                     .get_search_count(&selected_drive, &search_query)
-                    .await
                     .unwrap_or(0);
                 let files = if count <= CACHED_SIZE {
                     query_use_case
                         .search_files(&selected_drive, &search_query, 0, count as usize)
-                        .await
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
@@ -196,7 +194,6 @@ impl ReadPage {
                 } else {
                     query_use_case
                         .search_files(&selected_drive, &search_query, page, ipp)
-                        .await
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
@@ -336,7 +333,6 @@ impl ReadPage {
             async move {
                 let files = query_use_case
                     .search_files(&selected_drive, &search_query, 0, total)
-                    .await
                     .unwrap_or_else(|error| {
                         popup_error(error);
                         vec![]

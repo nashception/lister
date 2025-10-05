@@ -24,7 +24,6 @@ impl DriveComboBox {
                 async move {
                     query_use_case
                         .list_drive_names()
-                        .await
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]

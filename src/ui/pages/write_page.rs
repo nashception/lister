@@ -6,7 +6,7 @@ use crate::ui::components::write::indexing::IndexingState;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
-use iced::widget::{Rule, button, column, container, row, text, text_input};
+use iced::widget::{button, column, container, row, text, text_input, Rule};
 use iced::{Alignment, Element, Length, Task};
 use iced_aw::Spinner;
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ impl WritePage {
             WriteMessage::DirectoryPressed => {
                 let picker = self.directory_picker.clone();
                 Task::perform(
-                    async move { picker.pick_directory().await },
+                    async move { picker.pick_directory() },
                     WriteMessage::DirectoryChanged,
                 )
             }
@@ -291,7 +291,6 @@ impl WritePage {
             async move {
                 indexing_use_case
                     .remove_duplicates(category, drive)
-                    .await
                     .unwrap_or_else(|error| popup_error_and_exit(error));
             },
             |_| WriteMessage::DatabaseCleaned,
@@ -310,7 +309,6 @@ impl WritePage {
                 async move {
                     indexing_use_case
                         .scan_directory(&directory)
-                        .await
                         .unwrap_or_else(|error| {
                             popup_error(error);
                             Vec::new()
@@ -338,7 +336,6 @@ impl WritePage {
             async move {
                 indexing_use_case
                     .insert_in_database(category, drive, drive_available_space as i64, files)
-                    .await
                     .unwrap_or(0)
             },
             WriteMessage::InsertInDatabaseFinished,

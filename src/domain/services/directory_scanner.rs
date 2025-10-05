@@ -1,4 +1,3 @@
-use crate::config::constants::TOKIO_RUNTIME;
 use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::entities::types::Bytes;
 use crate::domain::errors::scanner_error::DirectoryScannerError;
@@ -6,21 +5,16 @@ use std::fs;
 use std::path::Path;
 use walkdir::WalkDir;
 
-pub async fn scan_directory(directory: &Path) -> Result<Vec<FileEntry>, DirectoryScannerError> {
+pub fn scan_directory(directory: &Path) -> Result<Vec<FileEntry>, DirectoryScannerError> {
     let directory = directory.to_path_buf();
 
-    TOKIO_RUNTIME
-        .handle()
-        .spawn_blocking(move || {
-            WalkDir::new(&directory)
-                .sort_by_file_name()
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-                .map(|e| extract_file_info(&directory, e.path()))
-                .collect()
-        })
-        .await?
+    WalkDir::new(&directory)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| extract_file_info(&directory, e.path()))
+        .collect()
 }
 
 fn extract_file_info(

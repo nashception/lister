@@ -1,4 +1,4 @@
-use crate::config::constants::{MIGRATIONS, TOKIO_RUNTIME};
+use crate::config::constants::MIGRATIONS;
 use crate::domain::entities::category::Category;
 use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::{FileEntry, FileWithMetadata};
@@ -58,19 +58,14 @@ impl SqliteFileRepository {
         Ok(())
     }
 
-    async fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
     where
         F: FnOnce(&mut DieselConnection) -> Result<R, RepositoryError> + Send + 'static,
         R: Send + 'static,
     {
         let pool = self.pool.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
-                operation(&mut conn)
-            })
-            .await?
+        let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
+        operation(&mut conn)
     }
 
     fn remove_duplicates(
@@ -163,9 +158,8 @@ impl SqliteFileRepository {
     }
 }
 
-#[async_trait::async_trait]
 impl FileQueryRepository for SqliteFileRepository {
-    async fn find_all_drive_names(&self) -> Result<Vec<String>, RepositoryError> {
+    fn find_all_drive_names(&self) -> Result<Vec<String>, RepositoryError> {
         self.execute_db_operation(|conn| {
             let drives = drive_entries::table
                 .select(drive_entries::name)
@@ -174,10 +168,9 @@ impl FileQueryRepository for SqliteFileRepository {
                 .load::<String>(conn)?;
             Ok(drives)
         })
-        .await
     }
 
-    async fn count_search_results(
+    fn count_search_results(
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
@@ -201,10 +194,9 @@ impl FileQueryRepository for SqliteFileRepository {
             let count = query1.count().get_result(conn)?;
             Ok(count)
         })
-        .await
     }
 
-    async fn search_files_paginated(
+    fn search_files_paginated(
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
@@ -256,13 +248,11 @@ impl FileQueryRepository for SqliteFileRepository {
 
             Ok(items)
         })
-        .await
     }
 }
 
-#[async_trait::async_trait]
 impl FileCommandRepository for SqliteFileRepository {
-    async fn remove_duplicates(
+    fn remove_duplicates(
         &self,
         category: Category,
         drive: DriveToDelete,
@@ -272,10 +262,9 @@ impl FileCommandRepository for SqliteFileRepository {
                 Self::remove_duplicates(category.name, drive.name, conn)
             })
         })
-        .await
     }
 
-    async fn save(
+    fn save(
         &self,
         category: Category,
         drive: Drive,
@@ -290,7 +279,6 @@ impl FileCommandRepository for SqliteFileRepository {
                 Self::save_files(files, drive_id, conn)
             })
         })
-        .await
     }
 }
 

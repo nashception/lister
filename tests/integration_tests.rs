@@ -65,8 +65,8 @@ impl TestFixture {
     }
 }
 
-#[tokio::test]
-async fn test_complete_file_indexing_workflow() {
+#[test]
+fn test_complete_file_indexing_workflow() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
@@ -78,8 +78,7 @@ async fn test_complete_file_indexing_workflow() {
             "Laptop".to_string(),
             1024,
             files.clone(),
-        )
-        .await;
+        );
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 4);
@@ -87,8 +86,7 @@ async fn test_complete_file_indexing_workflow() {
     // Verify files were indexed
     let query_result = fixture
         .query_service
-        .search_files(&None, &None, 0, 10)
-        .await;
+        .search_files(&None, &None, 0, 10);
     assert!(query_result.is_ok());
 
     let actual = query_result.unwrap();
@@ -103,8 +101,8 @@ async fn test_complete_file_indexing_workflow() {
     assert!(files.iter().any(|f| f.path == first_file.path));
 }
 
-#[tokio::test]
-async fn test_duplicate_removal_workflow() {
+#[test]
+fn test_duplicate_removal_workflow() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
@@ -117,21 +115,18 @@ async fn test_duplicate_removal_workflow() {
             1024,
             files.clone(),
         )
-        .await
         .expect("First indexing failed");
 
     // Remove duplicates
     let remove_result = fixture
         .indexing_service
-        .remove_duplicates("Work".to_string(), "Laptop".to_string())
-        .await;
+        .remove_duplicates("Work".to_string(), "Laptop".to_string());
     assert!(remove_result.is_ok());
 
     // Verify files were removed
     let query_result = fixture
         .query_service
         .search_files(&None, &None, 0, 10)
-        .await
         .unwrap();
     assert_eq!(query_result.len(), 0);
 
@@ -139,19 +134,17 @@ async fn test_duplicate_removal_workflow() {
     fixture
         .indexing_service
         .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
-        .await
         .expect("Second indexing failed");
 
     let final_result = fixture
         .query_service
         .search_files(&None, &None, 0, 10)
-        .await
         .unwrap();
     assert_eq!(final_result.len(), 4);
 }
 
-#[tokio::test]
-async fn test_file_search_functionality() {
+#[test]
+fn test_file_search_functionality() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
@@ -159,14 +152,12 @@ async fn test_file_search_functionality() {
     fixture
         .indexing_service
         .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
-        .await
         .expect("Indexing failed");
 
     // Test search by extension
     let pdf_results = fixture
         .query_service
         .search_files(&None, &Some(String::from(".pdf")), 0, 10)
-        .await
         .unwrap();
     assert_eq!(pdf_results.len(), 2);
     assert!(pdf_results.iter().all(|f| f.path.contains(".pdf")));
@@ -175,7 +166,6 @@ async fn test_file_search_functionality() {
     let doc_results = fixture
         .query_service
         .search_files(&None, &Some(String::from("documents")), 0, 10)
-        .await
         .unwrap();
     assert_eq!(doc_results.len(), 2);
     assert!(doc_results.iter().all(|f| f.path.contains("documents")));
@@ -184,7 +174,6 @@ async fn test_file_search_functionality() {
     let main_results = fixture
         .query_service
         .search_files(&None, &Some(String::from("main")), 0, 10)
-        .await
         .unwrap();
     assert_eq!(main_results.len(), 1);
     assert_eq!(main_results[0].path, "code/main.rs");
@@ -193,13 +182,12 @@ async fn test_file_search_functionality() {
     let all_results = fixture
         .query_service
         .search_files(&None, &Some(String::from("")), 0, 10)
-        .await
         .unwrap();
     assert_eq!(all_results.len(), 4);
 }
 
-#[tokio::test]
-async fn test_selected_drive_basic_functionality() {
+#[test]
+fn test_selected_drive_basic_functionality() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
@@ -212,7 +200,6 @@ async fn test_selected_drive_basic_functionality() {
             1024,
             files.clone(),
         )
-        .await
         .expect("Laptop indexing failed");
 
     fixture
@@ -223,20 +210,17 @@ async fn test_selected_drive_basic_functionality() {
             2048,
             files.clone(),
         )
-        .await
         .expect("Desktop indexing failed");
 
     fixture
         .indexing_service
         .insert_in_database("Work".to_string(), "Server".to_string(), 4096, files)
-        .await
         .expect("Server indexing failed");
 
     // Test selecting specific drive
     let laptop_results = fixture
         .query_service
         .search_files(&Some("Laptop".to_string()), &None, 0, 20)
-        .await
         .unwrap();
     assert_eq!(laptop_results.len(), 4);
     assert!(laptop_results.iter().all(|f| f.drive_name == "Laptop"));
@@ -244,7 +228,6 @@ async fn test_selected_drive_basic_functionality() {
     let desktop_results = fixture
         .query_service
         .search_files(&Some("Desktop".to_string()), &None, 0, 20)
-        .await
         .unwrap();
     assert_eq!(desktop_results.len(), 4);
     assert!(desktop_results.iter().all(|f| f.drive_name == "Desktop"));
@@ -252,7 +235,6 @@ async fn test_selected_drive_basic_functionality() {
     let server_results = fixture
         .query_service
         .search_files(&Some("Server".to_string()), &None, 0, 20)
-        .await
         .unwrap();
     assert_eq!(server_results.len(), 4);
     assert!(server_results.iter().all(|f| f.drive_name == "Server"));
@@ -261,13 +243,12 @@ async fn test_selected_drive_basic_functionality() {
     let all_results = fixture
         .query_service
         .search_files(&None, &None, 0, 20)
-        .await
         .unwrap();
     assert_eq!(all_results.len(), 12); // 4 files × 3 drives
 }
 
-#[tokio::test]
-async fn test_selected_drive_with_search_query() {
+#[test]
+fn test_selected_drive_with_search_query() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
@@ -280,13 +261,11 @@ async fn test_selected_drive_with_search_query() {
             1024,
             files.clone(),
         )
-        .await
         .expect("Laptop indexing failed");
 
     fixture
         .indexing_service
         .insert_in_database("Work".to_string(), "Desktop".to_string(), 2048, files)
-        .await
         .expect("Desktop indexing failed");
 
     // Test combining drive selection with search query
@@ -298,7 +277,6 @@ async fn test_selected_drive_with_search_query() {
             0,
             10,
         )
-        .await
         .unwrap();
     assert_eq!(laptop_pdf_results.len(), 2);
     assert!(
@@ -315,7 +293,6 @@ async fn test_selected_drive_with_search_query() {
             0,
             10,
         )
-        .await
         .unwrap();
     assert_eq!(desktop_pdf_results.len(), 2);
     assert!(
@@ -328,7 +305,6 @@ async fn test_selected_drive_with_search_query() {
     let all_pdf_results = fixture
         .query_service
         .search_files(&None, &Some(".pdf".to_string()), 0, 10)
-        .await
         .unwrap();
     assert_eq!(all_pdf_results.len(), 4); // 2 PDFs × 2 drives
 
@@ -341,13 +317,12 @@ async fn test_selected_drive_with_search_query() {
             0,
             10,
         )
-        .await
         .unwrap();
     assert_eq!(laptop_nonexistent_results.len(), 0);
 }
 
-#[tokio::test]
-async fn test_selected_drive_nonexistent_drive() {
+#[test]
+fn test_selected_drive_nonexistent_drive() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
@@ -355,14 +330,12 @@ async fn test_selected_drive_nonexistent_drive() {
     fixture
         .indexing_service
         .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
-        .await
         .expect("Indexing failed");
 
     // Test selecting a nonexistent drive
     let nonexistent_results = fixture
         .query_service
         .search_files(&Some("NonexistentDrive".to_string()), &None, 0, 10)
-        .await
         .unwrap();
     assert_eq!(nonexistent_results.len(), 0);
     assert_eq!(nonexistent_results.len(), 0);
@@ -376,14 +349,13 @@ async fn test_selected_drive_nonexistent_drive() {
             0,
             10,
         )
-        .await
         .unwrap();
     assert_eq!(nonexistent_with_query.len(), 0);
     assert_eq!(nonexistent_with_query.len(), 0);
 }
 
-#[tokio::test]
-async fn test_selected_drive_with_pagination() {
+#[test]
+fn test_selected_drive_with_pagination() {
     let fixture = TestFixture::new();
 
     // Create many files for pagination testing
@@ -404,27 +376,23 @@ async fn test_selected_drive_with_pagination() {
             1024,
             many_files.clone(),
         )
-        .await
         .expect("Drive1 indexing failed");
 
     fixture
         .indexing_service
         .insert_in_database("Test".to_string(), "Drive2".to_string(), 2048, many_files)
-        .await
         .expect("Drive2 indexing failed");
 
     // Test pagination with drive selection
     let drive1_page0 = fixture
         .query_service
         .search_files(&Some("Drive1".to_string()), &None, 0, 100)
-        .await
         .unwrap();
     assert_eq!(drive1_page0.len(), 100);
 
     let count = fixture
         .query_service
         .get_search_count(&Some("Drive1".to_string()), &None)
-        .await
         .unwrap();
 
     assert_eq!(count, 150);
@@ -433,14 +401,12 @@ async fn test_selected_drive_with_pagination() {
     let drive1_page1 = fixture
         .query_service
         .search_files(&Some("Drive1".to_string()), &None, 1, 100)
-        .await
         .unwrap();
     assert_eq!(drive1_page1.len(), 50);
 
     let count = fixture
         .query_service
         .get_search_count(&Some("Drive1".to_string()), &None)
-        .await
         .unwrap();
 
     assert_eq!(count, 150);
@@ -450,14 +416,12 @@ async fn test_selected_drive_with_pagination() {
     let all_page0 = fixture
         .query_service
         .search_files(&None, &None, 0, 100)
-        .await
         .unwrap();
     assert_eq!(all_page0.len(), 100);
 
     let count = fixture
         .query_service
         .get_search_count(&None, &None)
-        .await
         .unwrap();
 
     assert_eq!(count, 300); // 150 files × 2 drives
@@ -465,21 +429,19 @@ async fn test_selected_drive_with_pagination() {
     let all_page2 = fixture
         .query_service
         .search_files(&None, &None, 2, 100)
-        .await
         .unwrap();
     assert_eq!(all_page2.len(), 100);
 
     let count = fixture
         .query_service
         .get_search_count(&None, &None)
-        .await
         .unwrap();
 
     assert_eq!(count, 300);
 }
 
-#[tokio::test]
-async fn test_pagination_behavior() {
+#[test]
+fn test_pagination_behavior() {
     let fixture = TestFixture::new();
 
     // Create many files to test pagination
@@ -494,14 +456,12 @@ async fn test_pagination_behavior() {
     fixture
         .indexing_service
         .insert_in_database("Test".to_string(), "Drive".to_string(), 2048, many_files)
-        .await
         .expect("Indexing failed");
 
     // Test first page
     let page_0 = fixture
         .query_service
         .search_files(&None, &None, 0, 100)
-        .await
         .unwrap();
     assert_eq!(page_0.len(), 100);
 
@@ -509,7 +469,6 @@ async fn test_pagination_behavior() {
     let page_1 = fixture
         .query_service
         .search_files(&None, &None, 1, 100)
-        .await
         .unwrap();
     assert_eq!(page_1.len(), 100);
 
@@ -517,7 +476,6 @@ async fn test_pagination_behavior() {
     let page_2 = fixture
         .query_service
         .search_files(&None, &None, 2, 100)
-        .await
         .unwrap();
     assert_eq!(page_2.len(), 50);
 
@@ -525,14 +483,12 @@ async fn test_pagination_behavior() {
     let page_3 = fixture
         .query_service
         .search_files(&None, &None, 3, 100)
-        .await
         .unwrap();
     assert_eq!(page_3.len(), 0);
 
     let count = fixture
         .query_service
         .get_search_count(&None, &None)
-        .await
         .unwrap();
 
     assert_eq!(
@@ -541,15 +497,14 @@ async fn test_pagination_behavior() {
     );
 }
 
-#[tokio::test]
-async fn test_search_result_count_accuracy() {
+#[test]
+fn test_search_result_count_accuracy() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
     fixture
         .indexing_service
         .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
-        .await
         .expect("Indexing failed");
 
     // Test that search results len() is accurate
@@ -557,7 +512,6 @@ async fn test_search_result_count_accuracy() {
     let search_results = fixture
         .query_service
         .search_files(&None, &Some(String::from(search_query)), 0, 100)
-        .await
         .unwrap();
 
     // Should find exactly 2 PDF files
@@ -568,8 +522,8 @@ async fn test_search_result_count_accuracy() {
     assert!(search_results.iter().all(|f| f.path.contains(".pdf")));
 }
 
-#[tokio::test]
-async fn test_language_management_workflow() {
+#[test]
+fn test_language_management_workflow() {
     let fixture = TestFixture::new();
 
     // Test default language
@@ -598,8 +552,8 @@ async fn test_language_management_workflow() {
     assert_eq!(toggled, Language::English);
 }
 
-#[tokio::test]
-async fn test_multiple_categories_and_drives() {
+#[test]
+fn test_multiple_categories_and_drives() {
     let fixture = TestFixture::new();
     let files = fixture.create_test_files();
 
@@ -612,7 +566,6 @@ async fn test_multiple_categories_and_drives() {
             1024,
             files.clone(),
         )
-        .await
         .expect("First indexing failed");
 
     fixture
@@ -623,20 +576,17 @@ async fn test_multiple_categories_and_drives() {
             512,
             files.clone(),
         )
-        .await
         .expect("Second indexing failed");
 
     fixture
         .indexing_service
         .insert_in_database("Work".to_string(), "Server".to_string(), 8192, files)
-        .await
         .expect("Third indexing failed");
 
     // Verify all files are indexed
     let all_files = fixture
         .query_service
         .search_files(&None, &None, 0, 20)
-        .await
         .unwrap();
     assert_eq!(all_files.len(), 12); // 4 files × 3 locations
 
@@ -654,47 +604,14 @@ async fn test_multiple_categories_and_drives() {
     assert!(drives.contains("Server"));
 }
 
-#[tokio::test]
-async fn test_concurrent_operations() {
-    let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
-
-    // Index initial files
-    fixture
-        .indexing_service
-        .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
-        .await
-        .expect("Initial indexing failed");
-
-    // Run concurrent read operations
-    let query_service = fixture.query_service.clone();
-    let handles: Vec<_> = (0..10)
-        .map(|i| {
-            let service = query_service.clone();
-            tokio::spawn(async move {
-                let result = service.search_files(&None, &None, 0, 10).await;
-                (i, result)
-            })
-        })
-        .collect();
-
-    // Wait for all operations to complete
-    for handle in handles {
-        let (_, result) = handle.await.expect("Task failed");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 4);
-    }
-}
-
-#[tokio::test]
-async fn test_edge_cases_and_error_handling() {
+#[test]
+fn test_edge_cases_and_error_handling() {
     let fixture = TestFixture::new();
 
     // Test empty search
     let empty_result = fixture
         .query_service
         .search_files(&None, &Some(String::from("")), 0, 10)
-        .await
         .unwrap();
     assert_eq!(empty_result.len(), 0);
 
@@ -702,7 +619,6 @@ async fn test_edge_cases_and_error_handling() {
     let no_matches = fixture
         .query_service
         .search_files(&None, &Some(String::from("nonexistent")), 0, 10)
-        .await
         .unwrap();
     assert_eq!(no_matches.len(), 0);
 
@@ -710,7 +626,6 @@ async fn test_edge_cases_and_error_handling() {
     let no_data = fixture
         .query_service
         .search_files(&None, &None, 5, 10)
-        .await
         .unwrap();
     assert_eq!(no_data.len(), 0);
     assert_eq!(no_data.len(), 0);
@@ -718,15 +633,13 @@ async fn test_edge_cases_and_error_handling() {
     // Test remove duplicates with no data
     let remove_empty = fixture
         .indexing_service
-        .remove_duplicates("NonExistent".to_string(), "Drive".to_string())
-        .await;
+        .remove_duplicates("NonExistent".to_string(), "Drive".to_string());
     assert!(remove_empty.is_ok());
 
     // Test indexing empty file list
     let empty_index = fixture
         .indexing_service
-        .insert_in_database("Empty".to_string(), "Drive".to_string(), 0, vec![])
-        .await;
+        .insert_in_database("Empty".to_string(), "Drive".to_string(), 0, vec![]);
     assert!(empty_index.is_ok());
     assert_eq!(empty_index.unwrap(), 0);
 
@@ -734,14 +647,13 @@ async fn test_edge_cases_and_error_handling() {
     let empty_drive_name = fixture
         .query_service
         .search_files(&Some("".to_string()), &None, 0, 10)
-        .await
         .unwrap();
     assert_eq!(empty_drive_name.len(), 0);
 }
 
 // Benchmark test to ensure performance doesn't regress
-#[tokio::test]
-async fn test_search_performance_with_large_dataset() {
+#[test]
+fn test_search_performance_with_large_dataset() {
     let fixture = TestFixture::new();
 
     // Create a large dataset
@@ -766,7 +678,6 @@ async fn test_search_performance_with_large_dataset() {
             16384,
             large_dataset,
         )
-        .await
         .expect("Large dataset indexing failed");
 
     let start = std::time::Instant::now();
@@ -775,7 +686,6 @@ async fn test_search_performance_with_large_dataset() {
     let search_result = fixture
         .query_service
         .search_files(&None, &Some(String::from("category_5")), 0, 100)
-        .await
         .unwrap();
 
     let elapsed = start.elapsed();
@@ -793,7 +703,6 @@ async fn test_search_performance_with_large_dataset() {
     let page_result = fixture
         .query_service
         .search_files(&None, &None, 50, 100)
-        .await
         .unwrap();
     let elapsed = start.elapsed();
 
