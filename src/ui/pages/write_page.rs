@@ -65,10 +65,10 @@ impl WritePage {
 
     pub fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
         match message {
-            WriteMessage::DirectoryPressed => {
+            WriteMessage::DirectoryPressed { dialog_title } => {
                 let picker = self.directory_picker.clone();
                 Task::perform(
-                    async move { picker.pick_directory() },
+                    async move { picker.pick_directory(&dialog_title) },
                     WriteMessage::DirectoryChanged,
                 )
             }
@@ -160,7 +160,9 @@ impl WritePage {
         .width(Length::Fill);
 
         let browse_button = button(text(tr!(translations, "browse_directory")))
-            .on_press(WriteMessage::DirectoryPressed)
+            .on_press(WriteMessage::DirectoryPressed {
+                dialog_title: tr!(translations, "browse_file_dialog"),
+            })
             .padding(10)
             .style(button::secondary);
 

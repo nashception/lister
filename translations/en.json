@@ -21,6 +21,7 @@
   "no_directory_selected": "No directory selected",
   "selected_directory": "Selected: {dir}",
   "browse_directory": "Browse directory",
+  "browse_file_dialog": "Select folder",
   "start_indexing": "Start indexing",
   "fill_all_fields": "Please fill in all fields to start indexing.",
   "clean_status": "[CLEAN] Cleaning database",
