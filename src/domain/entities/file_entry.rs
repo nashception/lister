@@ -1,24 +1,24 @@
-use crate::domain::entities::types::Bytes;
 use chrono::NaiveDateTime;
 use std::path::Path;
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
     pub path: String,
-    pub size_bytes: Bytes,
+    pub size_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
 pub struct FileWithMetadata {
     pub category_name: String,
     pub drive_name: String,
-    pub drive_available_space: Bytes,
+    pub drive_available_space: u64,
     pub drive_insertion_time: NaiveDateTime,
     pub path: String,
-    pub size_bytes: Bytes,
+    pub size_bytes: u64,
 }
 
 impl FileWithMetadata {
+    #[must_use]
     pub fn parent_directory(&self) -> String {
         Path::new(&self.path)
             .parent()
@@ -26,6 +26,7 @@ impl FileWithMetadata {
             .unwrap_or_default()
     }
 
+    #[must_use]
     pub fn filename(&self) -> String {
         Path::new(&self.path)
             .file_name()

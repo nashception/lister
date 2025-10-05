@@ -1,7 +1,6 @@
 use chrono::Local;
 use lister::domain::entities::file_entry::FileEntry;
 use lister::domain::entities::language::Language;
-use lister::domain::entities::types::Bytes;
 use lister::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
 use lister::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use lister::domain::ports::primary::language_use_case::LanguageManagementUseCase;
@@ -33,7 +32,7 @@ impl TestFixture {
         let query_service = Arc::new(FileQueryService::new(repo.clone()));
         let indexing_service = Arc::new(FileIndexingService::new(repo.clone()));
         let translation_loader = Arc::new(JsonTranslationLoader);
-        let language_service = Arc::new(LanguageService::new(repo.clone(), translation_loader));
+        let language_service = Arc::new(LanguageService::new(repo, translation_loader));
 
         Self {
             _temp_dir: temp_dir,
@@ -43,23 +42,23 @@ impl TestFixture {
         }
     }
 
-    fn create_test_files(&self) -> Vec<FileEntry> {
+    fn create_test_files() -> Vec<FileEntry> {
         vec![
             FileEntry {
                 path: "documents/report.pdf".to_string(),
-                size_bytes: Bytes(1024),
+                size_bytes: 1024,
             },
             FileEntry {
                 path: "images/photo.jpg".to_string(),
-                size_bytes: Bytes(2048),
+                size_bytes: 2048,
             },
             FileEntry {
                 path: "code/main.rs".to_string(),
-                size_bytes: Bytes(512),
+                size_bytes: 512,
             },
             FileEntry {
                 path: "documents/invoice.pdf".to_string(),
-                size_bytes: Bytes(768),
+                size_bytes: 768,
             },
         ]
     }
@@ -68,25 +67,21 @@ impl TestFixture {
 #[test]
 fn test_complete_file_indexing_workflow() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     // Test indexing workflow
-    let result = fixture
-        .indexing_service
-        .insert_in_database(
-            "Work".to_string(),
-            "Laptop".to_string(),
-            1024,
-            files.clone(),
-        );
+    let result = fixture.indexing_service.insert_in_database(
+        "Work".to_string(),
+        "Laptop".to_string(),
+        1024,
+        files.clone(),
+    );
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 4);
 
     // Verify files were indexed
-    let query_result = fixture
-        .query_service
-        .search_files(&None, &None, 0, 10);
+    let query_result = fixture.query_service.search_files(&None, &None, 0, 10);
     assert!(query_result.is_ok());
 
     let actual = query_result.unwrap();
@@ -96,7 +91,7 @@ fn test_complete_file_indexing_workflow() {
     let first_file = &actual[0];
     assert_eq!(first_file.category_name, "Work");
     assert_eq!(first_file.drive_name, "Laptop");
-    assert_eq!(first_file.drive_available_space.0, 1024);
+    assert_eq!(first_file.drive_available_space, 1024);
     assert!(first_file.drive_insertion_time <= Local::now().naive_local());
     assert!(files.iter().any(|f| f.path == first_file.path));
 }
@@ -104,7 +99,7 @@ fn test_complete_file_indexing_workflow() {
 #[test]
 fn test_duplicate_removal_workflow() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     // Index files first time
     fixture
@@ -146,7 +141,7 @@ fn test_duplicate_removal_workflow() {
 #[test]
 fn test_file_search_functionality() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     // Index test files
     fixture
@@ -181,7 +176,7 @@ fn test_file_search_functionality() {
     // Test empty search returns all files
     let all_results = fixture
         .query_service
-        .search_files(&None, &Some(String::from("")), 0, 10)
+        .search_files(&None, &Some(String::new()), 0, 10)
         .unwrap();
     assert_eq!(all_results.len(), 4);
 }
@@ -189,7 +184,7 @@ fn test_file_search_functionality() {
 #[test]
 fn test_selected_drive_basic_functionality() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     // Index files on different drives
     fixture
@@ -250,7 +245,7 @@ fn test_selected_drive_basic_functionality() {
 #[test]
 fn test_selected_drive_with_search_query() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     // Index files on different drives
     fixture
@@ -324,7 +319,7 @@ fn test_selected_drive_with_search_query() {
 #[test]
 fn test_selected_drive_nonexistent_drive() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     // Index files on one drive
     fixture
@@ -362,8 +357,8 @@ fn test_selected_drive_with_pagination() {
     let mut many_files = Vec::new();
     for i in 0..150 {
         many_files.push(FileEntry {
-            path: format!("file_{:03}.txt", i),
-            size_bytes: Bytes(i * 10),
+            path: format!("file_{i:03}.txt"),
+            size_bytes: i * 10,
         });
     }
 
@@ -448,8 +443,8 @@ fn test_pagination_behavior() {
     let mut many_files = Vec::new();
     for i in 0..250 {
         many_files.push(FileEntry {
-            path: format!("file_{:03}.txt", i),
-            size_bytes: Bytes(i * 10),
+            path: format!("file_{i:03}.txt"),
+            size_bytes: i * 10,
         });
     }
 
@@ -493,14 +488,14 @@ fn test_pagination_behavior() {
 
     assert_eq!(
         count,
-        (page_0.len() + page_1.len() + page_2.len() + page_3.len()) as i64
+        (page_0.len() + page_1.len() + page_2.len() + page_3.len()) as u64
     );
 }
 
 #[test]
 fn test_search_result_count_accuracy() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     fixture
         .indexing_service
@@ -534,7 +529,7 @@ fn test_language_management_workflow() {
     let french = Language::French;
     fixture
         .language_service
-        .set_language(french.clone())
+        .set_language(french)
         .expect("Failed to set language");
 
     let current_lang = fixture.language_service.get_current_language().unwrap();
@@ -555,7 +550,7 @@ fn test_language_management_workflow() {
 #[test]
 fn test_multiple_categories_and_drives() {
     let fixture = TestFixture::new();
-    let files = fixture.create_test_files();
+    let files = TestFixture::create_test_files();
 
     // Index files in different categories and drives
     fixture
@@ -611,7 +606,7 @@ fn test_edge_cases_and_error_handling() {
     // Test empty search
     let empty_result = fixture
         .query_service
-        .search_files(&None, &Some(String::from("")), 0, 10)
+        .search_files(&None, &Some(String::new()), 0, 10)
         .unwrap();
     assert_eq!(empty_result.len(), 0);
 
@@ -637,16 +632,19 @@ fn test_edge_cases_and_error_handling() {
     assert!(remove_empty.is_ok());
 
     // Test indexing empty file list
-    let empty_index = fixture
-        .indexing_service
-        .insert_in_database("Empty".to_string(), "Drive".to_string(), 0, vec![]);
+    let empty_index = fixture.indexing_service.insert_in_database(
+        "Empty".to_string(),
+        "Drive".to_string(),
+        0,
+        vec![],
+    );
     assert!(empty_index.is_ok());
     assert_eq!(empty_index.unwrap(), 0);
 
     // Test selected drive edge cases
     let empty_drive_name = fixture
         .query_service
-        .search_files(&Some("".to_string()), &None, 0, 10)
+        .search_files(&Some(String::new()), &None, 0, 10)
         .unwrap();
     assert_eq!(empty_drive_name.len(), 0);
 }
@@ -666,7 +664,7 @@ fn test_search_performance_with_large_dataset() {
                 i % 100,
                 i
             ),
-            size_bytes: Bytes(i),
+            size_bytes: i,
         });
     }
 
@@ -692,11 +690,9 @@ fn test_search_performance_with_large_dataset() {
 
     // Ensure reasonable performance (adjust threshold as needed)
     assert!(
-        elapsed.as_millis() < 1000,
-        "Search took too long: {:?}",
-        elapsed
+        elapsed.as_millis() < 1000
     );
-    assert!(search_result.len() > 0);
+    assert!(!search_result.is_empty());
 
     // Test pagination performance
     let start = std::time::Instant::now();
@@ -706,10 +702,6 @@ fn test_search_performance_with_large_dataset() {
         .unwrap();
     let elapsed = start.elapsed();
 
-    assert!(
-        elapsed.as_millis() < 500,
-        "Pagination took too long: {:?}",
-        elapsed
-    );
+    assert!(elapsed.as_millis() < 500);
     assert_eq!(page_result.len(), 100);
 }

@@ -1,29 +1,31 @@
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Language {
     English,
     French,
 }
 
 impl Language {
+    #[must_use]
     pub fn new(code: &str) -> Self {
         match code.to_lowercase().as_str() {
-            "en" => Language::English,
-            "fr" => Language::French,
-            _ => Language::English,
+            "fr" => Self::French,
+            _ => Self::English,
         }
     }
 
-    pub fn code(&self) -> &str {
+    #[must_use]
+    pub const fn code(&self) -> &str {
         match self {
-            Language::English => "en",
-            Language::French => "fr",
+            Self::English => "en",
+            Self::French => "fr",
         }
     }
 
-    pub fn toggle(&self) -> Self {
+    #[must_use]
+    pub const fn toggle(&self) -> Self {
         match self {
-            Language::English => Language::French,
-            Language::French => Language::English,
+            Self::English => Self::French,
+            Self::French => Self::English,
         }
     }
 }

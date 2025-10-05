@@ -1,10 +1,9 @@
-use crate::domain::entities::types::Bytes;
 use std::fmt::{Display, Formatter, Result};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Drive {
     pub name: String,
-    pub available_space: Bytes,
+    pub available_space: u64,
 }
 
 #[derive(Clone, Debug)]

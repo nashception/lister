@@ -21,7 +21,7 @@ struct WriteData {
 }
 
 impl WriteData {
-    fn is_complete(&self) -> bool {
+    const fn is_complete(&self) -> bool {
         self.directory.is_some() && !self.category.is_empty() && !self.drive.is_empty()
     }
 }
@@ -42,12 +42,12 @@ impl WritePage {
             indexing_use_case,
             directory_picker,
             state: IndexingState::Ready,
-            write_data: Default::default(),
+            write_data: WriteData::default(),
         };
         (page, Task::none())
     }
 
-    pub fn title(&self, translations: &HashMap<String, String>) -> String {
+    pub fn title(translations: &HashMap<String, String>) -> String {
         tr!(translations, "write_page_title")
     }
 
@@ -79,7 +79,7 @@ impl WritePage {
                         drive: data.drive_name,
                         drive_available_space: data.drive_available_space,
                     }
-                };
+                }
                 Task::none()
             }
             WriteMessage::CategoryChanged(value) => {
@@ -150,12 +150,10 @@ impl WritePage {
     ) -> Element<'_, WriteMessage> {
         let directory_label = text(tr!(translations, "directory_label")).size(16);
 
-        let directory_display = if let Some(dir) = &self.write_data.directory {
+        let directory_display = self.write_data.directory.as_ref()
+            .map_or_else(|| text(tr!(translations, "no_directory_selected")).style(text::secondary), |dir| 
             text(tr!(translations, "selected_directory", "dir" => &dir.display().to_string()))
-                .style(text::success)
-        } else {
-            text(tr!(translations, "no_directory_selected")).style(text::secondary)
-        }
+                .style(text::success))
         .width(Length::Fill);
 
         let browse_button = button(text(tr!(translations, "browse_directory")))
@@ -181,10 +179,10 @@ impl WritePage {
     ) -> Element<'_, WriteMessage> {
         let submit_button = self.submit_button(translations);
 
-        let requirements_text = if !self.write_data.is_complete() {
-            text(tr!(translations, "fill_all_fields")).style(text::danger)
-        } else {
+        let requirements_text = if self.write_data.is_complete() {
             text("")
+        } else {
+            text(tr!(translations, "fill_all_fields")).style(text::danger)
         }
         .width(Length::Fill);
 
@@ -294,7 +292,7 @@ impl WritePage {
                     .remove_duplicates(category, drive)
                     .unwrap_or_else(|error| popup_error_and_exit(error));
             },
-            |_| WriteMessage::DatabaseCleaned,
+            |()| WriteMessage::DatabaseCleaned,
         )
     }
 
@@ -305,21 +303,22 @@ impl WritePage {
         self.state = IndexingState::Scanning;
 
         let indexing_use_case = self.indexing_use_case.clone();
-        if let Some(directory) = self.write_data.directory.clone() {
-            Task::perform(
-                async move {
-                    indexing_use_case
-                        .scan_directory(&directory)
-                        .unwrap_or_else(|error| {
-                            popup_error(error);
-                            Vec::new()
-                        })
-                },
-                WriteMessage::ScanDirectoryFinished,
-            )
-        } else {
-            Task::none()
-        }
+        self.write_data
+            .directory
+            .clone()
+            .map_or_else(Task::none, |directory| {
+                Task::perform(
+                    async move {
+                        indexing_use_case
+                            .scan_directory(&directory)
+                            .unwrap_or_else(|error| {
+                                popup_error(error);
+                                Vec::new()
+                            })
+                    },
+                    WriteMessage::ScanDirectoryFinished,
+                )
+            })
     }
 
     fn insert_in_database(&mut self, files: Vec<FileEntry>) -> Task<WriteMessage> {
@@ -336,7 +335,7 @@ impl WritePage {
         Task::perform(
             async move {
                 indexing_use_case
-                    .insert_in_database(category, drive, drive_available_space as i64, files)
+                    .insert_in_database(category, drive, drive_available_space, files)
                     .unwrap_or(0)
             },
             WriteMessage::InsertInDatabaseFinished,

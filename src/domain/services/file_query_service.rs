@@ -24,7 +24,7 @@ impl FileQueryUseCase for FileQueryService {
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
-    ) -> Result<i64, DomainError> {
+    ) -> Result<u64, DomainError> {
         let count = self
             .query_repo
             .count_search_results(selected_drive, query)?;
@@ -35,11 +35,11 @@ impl FileQueryUseCase for FileQueryService {
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
-        page: usize,
-        page_size: usize,
+        page: u64,
+        page_size: u64,
     ) -> Result<Vec<FileWithMetadata>, DomainError> {
-        let offset = (page * page_size) as i64;
-        let limit = page_size as i64;
+        let offset = page * page_size;
+        let limit = page_size;
 
         self.query_repo
             .search_files_paginated(selected_drive, query, offset, limit)
