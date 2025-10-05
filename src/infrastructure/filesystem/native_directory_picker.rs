@@ -24,7 +24,6 @@ impl DirectoryPicker for NativeDirectoryPicker {
         {
             linux_runtime::TOKIO_RUNTIME.block_on(async {
                 rfd::AsyncFileDialog::new()
-                    .set_title("Select Directory to Index")
                     .pick_folder()
                     .await
                     .map(|handle| directory_data(handle.path()))
@@ -34,7 +33,6 @@ impl DirectoryPicker for NativeDirectoryPicker {
         #[cfg(target_os = "windows")]
         {
             rfd::FileDialog::new()
-                .set_title("Select Directory to Index")
                 .pick_folder()
                 .map(|handle| directory_data(handle.as_path()))
         }
