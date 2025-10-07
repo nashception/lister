@@ -1,4 +1,3 @@
-use crate::ui::utils::translation::tr_impl;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -45,7 +44,7 @@ impl ReadPage {
         (page, Task::batch([combo_box_task, search_task]))
     }
 
-    pub fn title(&self, translations: &HashMap<String, String>) -> String {
+    pub fn title(translations: &HashMap<String, String>) -> String {
         tr!(translations, "read_page_title")
     }
 
@@ -111,7 +110,7 @@ impl ReadPage {
         }
     }
 
-    pub fn subscription(&self) -> Subscription<ReadMessage> {
+    pub fn subscription() -> Subscription<ReadMessage> {
         Subscription::batch([
             keyboard::on_key_press(|key, modifiers| {
                 let keyboard::Key::Named(key) = key else {
@@ -153,7 +152,7 @@ impl ReadPage {
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {
         if let Some(files) = self.cache.get_page(
-            &self.drive_combo_box.selected_drive,
+            self.drive_combo_box.selected_drive.as_ref(),
             &self.search.query,
             self.pagination.current_page_index,
             ITEMS_PER_PAGE,
@@ -164,7 +163,7 @@ impl ReadPage {
 
         if !self
             .cache
-            .is_valid_for(&self.drive_combo_box.selected_drive, &self.search.query)
+            .is_valid_for(self.drive_combo_box.selected_drive.as_ref(), &self.search.query)
         {
             self.cache.clear();
         }
@@ -183,20 +182,17 @@ impl ReadPage {
             async move {
                 let count = query_use_case
                     .get_search_count(&selected_drive, &search_query)
-                    .await
                     .unwrap_or(0);
                 let files = if count <= CACHED_SIZE {
                     query_use_case
-                        .search_files(&selected_drive, &search_query, 0, count as usize)
-                        .await
+                        .search_files(&selected_drive, &search_query, 0, count)
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
                         })
                 } else {
                     query_use_case
-                        .search_files(&selected_drive, &search_query, page, ipp)
-                        .await
+                        .search_files(&selected_drive, &search_query, page as u64, ipp as u64)
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
@@ -271,11 +267,11 @@ impl ReadPage {
         }
     }
 
-    fn update_total_count(&mut self, result: &PaginatedResult) {
+    const fn update_total_count(&mut self, result: &PaginatedResult) {
         self.pagination.total_count = result.total_count;
     }
 
-    fn should_warm_cache(&self, result: &PaginatedResult) -> bool {
+    const fn should_warm_cache(&self, result: &PaginatedResult) -> bool {
         result.total_count > 0
             && result.total_count <= CACHED_SIZE
             && self.pagination.current_page_index == 0
@@ -283,15 +279,15 @@ impl ReadPage {
 
     fn handle_small_dataset(&mut self, result: PaginatedResult) -> Task<ReadMessage> {
         // Case A: the result already contains the full dataset -> store & show slice
-        if result.items.len() == result.total_count as usize {
+        if result.items.len() == usize::try_from(result.total_count).unwrap() {
             return self.store_full_and_show_page(result.items);
         }
 
         // Case B: we only received a single page; start warming if not already warming
-        if !self.is_cache_warming {
-            self.start_cache_warm(result.items)
-        } else {
+        if self.is_cache_warming {
             self.show_page(result.items)
+        } else {
+            self.start_cache_warm(result.items)
         }
     }
 
@@ -300,11 +296,11 @@ impl ReadPage {
         self.cache.store(
             self.drive_combo_box.selected_drive.clone(),
             self.search.query.clone(),
-            full_items.clone(),
+            full_items,
         );
 
         if let Some(page_files) = self.cache.get_page(
-            &self.drive_combo_box.selected_drive,
+            self.drive_combo_box.selected_drive.as_ref(),
             &self.search.query,
             self.pagination.current_page_index,
             ITEMS_PER_PAGE,
@@ -330,20 +326,19 @@ impl ReadPage {
             Some(self.search.query.clone())
         };
         let query_use_case = self.query_use_case.clone();
-        let total = self.pagination.total_count as usize;
+        let total = self.pagination.total_count;
 
         Task::perform(
             async move {
                 let files = query_use_case
                     .search_files(&selected_drive, &search_query, 0, total)
-                    .await
                     .unwrap_or_else(|error| {
                         popup_error(error);
                         vec![]
                     });
                 PaginatedResult {
                     items: files,
-                    total_count: total as i64,
+                    total_count: total,
                 }
             },
             ReadMessage::FilesLoaded,

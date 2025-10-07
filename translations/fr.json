@@ -21,6 +21,7 @@
   "no_directory_selected": "Aucun répertoire sélectionné",
   "selected_directory": "Sélectionné : {dir}",
   "browse_directory": "Parcourir le répertoire",
+  "browse_file_dialog": "Sélectionnez un répertoire",
   "start_indexing": "Commencer l'indexation",
   "fill_all_fields": "Veuillez remplir tous les champs pour démarrer l'indexation.",
   "clean_status": "[CLEAN] Nettoyage de la base de donnée",

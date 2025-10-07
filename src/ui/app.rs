@@ -4,7 +4,6 @@ use crate::ui::app_factory::ListerAppService;
 use crate::ui::messages::app_message::AppMessage;
 use crate::ui::pages::read_page::ReadPage;
 use crate::ui::pages::write_page::WritePage;
-use crate::ui::utils::translation::tr_impl;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;
@@ -42,6 +41,7 @@ impl ListerApp {
         )
     }
 
+    #[must_use]
     pub fn window() -> Settings {
         Settings {
             icon: Self::lister_icon(),
@@ -49,12 +49,13 @@ impl ListerApp {
         }
     }
 
+    #[must_use]
     pub fn title(&self) -> String {
         format!(
             "{} (v{})",
             match &self.current_page {
-                Page::Read(page) => page.title(&self.translations),
-                Page::Write(page) => page.title(&self.translations),
+                Page::Read(_) => ReadPage::title(&self.translations),
+                Page::Write(_) => WritePage::title(&self.translations),
             },
             env!("CARGO_PKG_VERSION")
         )
@@ -147,7 +148,7 @@ impl ListerApp {
             }
         });
         let page_subscription = match &self.current_page {
-            Page::Read(read_page) => read_page.subscription().map(AppMessage::Read),
+            Page::Read(_) => ReadPage::subscription().map(AppMessage::Read),
             Page::Write(_) => Subscription::none(),
         };
 
@@ -195,7 +196,7 @@ impl ListerApp {
             .into()
     }
 
-    fn change_language(&mut self, language: Language) -> Task<AppMessage> {
+    fn change_language(&self, language: Language) -> Task<AppMessage> {
         let language_use_case = self.service.language_use_case.clone();
         Task::perform(
             async move {

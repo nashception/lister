@@ -1,13 +1,13 @@
-use crate::config::constants::{MIGRATIONS, TOKIO_RUNTIME};
+use crate::config::constants::MIGRATIONS;
 use crate::domain::entities::category::Category;
 use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::{FileEntry, FileWithMetadata};
 use crate::domain::entities::language::Language;
-use crate::domain::entities::types::Bytes;
 use crate::domain::errors::repository_error::RepositoryError;
 use crate::domain::ports::secondary::repositories::{
     FileCommandRepository, FileQueryRepository, LanguageRepository,
 };
+use crate::infrastructure::database::conversion::{ToI64, ToU64};
 use crate::infrastructure::database::entities::{
     FileWithMetadataDto, NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
 };
@@ -29,6 +29,17 @@ pub struct SqliteFileRepository {
 }
 
 impl SqliteFileRepository {
+    /// Creates a new [`SqliteFileRepository`] using the given database URL.
+    ///
+    /// Initializes the connection pool, enables foreign keys,
+    /// and runs all pending migrations.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while creating the connection pool.
+    /// - A [`Database`](RepositoryError::Database) error occurs while enabling foreign keys.
+    /// - A [`Migration`](RepositoryError::Migration) error occurs while running migrations.
     pub fn new(database_url: &str) -> Result<Self, RepositoryError> {
         let pool = Self::create_pool(database_url)?;
         Self::enable_foreign_keys(&pool)?;
@@ -58,19 +69,14 @@ impl SqliteFileRepository {
         Ok(())
     }
 
-    async fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
     where
         F: FnOnce(&mut DieselConnection) -> Result<R, RepositoryError> + Send + 'static,
         R: Send + 'static,
     {
         let pool = self.pool.clone();
-        TOKIO_RUNTIME
-            .handle()
-            .spawn_blocking(move || {
-                let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
-                operation(&mut conn)
-            })
-            .await?
+        let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
+        operation(&mut conn)
     }
 
     fn remove_duplicates(
@@ -114,7 +120,7 @@ impl SqliteFileRepository {
             .values(NewDriveEntryDto {
                 category_id,
                 name: drive.name.clone(),
-                available_space: drive.available_space.0,
+                available_space: drive.available_space.to_i64_or_zero(),
                 insertion_time: Local::now().naive_local(),
             })
             .returning(drive_entries::id)
@@ -130,7 +136,7 @@ impl SqliteFileRepository {
         conn: &mut SqliteConnection,
     ) -> Result<(), RepositoryError> {
         update(drive_entries::table.filter(drive_entries::name.eq(drive.name)))
-            .set(drive_entries::available_space.eq(drive.available_space.0))
+            .set(drive_entries::available_space.eq(drive.available_space.to_i64_or_zero()))
             .execute(conn)?;
         Ok(())
     }
@@ -145,7 +151,7 @@ impl SqliteFileRepository {
             .map(|f| NewFileEntryDto {
                 drive_id,
                 path: f.path,
-                weight: f.size_bytes.0,
+                weight: f.size_bytes.to_i64_or_zero(),
             })
             .collect();
 
@@ -156,16 +162,13 @@ impl SqliteFileRepository {
         Ok(insert_count)
     }
 
-    fn search_pattern(query: &Option<String>) -> Option<String> {
-        query
-            .clone()
-            .map(|dto| format!("%{}%", dto).replace(" ", "_"))
+    fn search_pattern(query: &String) -> String {
+        format!("%{query}%").replace(' ', "_")
     }
 }
 
-#[async_trait::async_trait]
 impl FileQueryRepository for SqliteFileRepository {
-    async fn find_all_drive_names(&self) -> Result<Vec<String>, RepositoryError> {
+    fn find_all_drive_names(&self) -> Result<Vec<String>, RepositoryError> {
         self.execute_db_operation(|conn| {
             let drives = drive_entries::table
                 .select(drive_entries::name)
@@ -174,16 +177,15 @@ impl FileQueryRepository for SqliteFileRepository {
                 .load::<String>(conn)?;
             Ok(drives)
         })
-        .await
     }
 
-    async fn count_search_results(
+    fn count_search_results(
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
-    ) -> Result<i64, RepositoryError> {
+    ) -> Result<u64, RepositoryError> {
         let selected_drive = selected_drive.clone();
-        let search_pattern = Self::search_pattern(query);
+        let search_pattern = query.as_ref().map(Self::search_pattern);
 
         self.execute_db_operation(move |conn| {
             let mut query1 = file_entries::table
@@ -198,21 +200,20 @@ impl FileQueryRepository for SqliteFileRepository {
                 query1 = query1.filter(file_entries::path.like(pattern));
             }
 
-            let count = query1.count().get_result(conn)?;
-            Ok(count)
+            let count: i64 = query1.count().get_result(conn)?;
+            Ok(count.to_u64_or_zero())
         })
-        .await
     }
 
-    async fn search_files_paginated(
+    fn search_files_paginated(
         &self,
         selected_drive: &Option<String>,
         query: &Option<String>,
-        offset: i64,
-        limit: i64,
+        offset: u64,
+        limit: u64,
     ) -> Result<Vec<FileWithMetadata>, RepositoryError> {
         let selected_drive = selected_drive.clone();
-        let search_pattern = Self::search_pattern(query);
+        let search_pattern = query.as_ref().map(Self::search_pattern);
 
         self.execute_db_operation(move |conn| {
             let mut query = file_entries::table
@@ -238,8 +239,8 @@ impl FileQueryRepository for SqliteFileRepository {
             }
 
             let entities = query
-                .limit(limit)
-                .offset(offset)
+                .limit(limit.to_i64_or_zero())
+                .offset(offset.to_i64_or_zero())
                 .load::<FileWithMetadataDto>(conn)?;
 
             let items = entities
@@ -247,22 +248,20 @@ impl FileQueryRepository for SqliteFileRepository {
                 .map(|dto| FileWithMetadata {
                     category_name: dto.category_name,
                     drive_name: dto.drive_name,
-                    drive_available_space: Bytes(dto.drive_available_space),
+                    drive_available_space: dto.drive_available_space.to_u64_or_zero(),
                     drive_insertion_time: dto.drive_insertion_time,
                     path: dto.path,
-                    size_bytes: Bytes(dto.weight),
+                    size_bytes: dto.weight.to_u64_or_zero(),
                 })
                 .collect();
 
             Ok(items)
         })
-        .await
     }
 }
 
-#[async_trait::async_trait]
 impl FileCommandRepository for SqliteFileRepository {
-    async fn remove_duplicates(
+    fn remove_duplicates(
         &self,
         category: Category,
         drive: DriveToDelete,
@@ -272,10 +271,9 @@ impl FileCommandRepository for SqliteFileRepository {
                 Self::remove_duplicates(category.name, drive.name, conn)
             })
         })
-        .await
     }
 
-    async fn save(
+    fn save(
         &self,
         category: Category,
         drive: Drive,
@@ -290,7 +288,6 @@ impl FileCommandRepository for SqliteFileRepository {
                 Self::save_files(files, drive_id, conn)
             })
         })
-        .await
     }
 }
 
@@ -303,9 +300,7 @@ impl LanguageRepository for SqliteFileRepository {
             .first(&mut conn)
             .optional()?;
 
-        Ok(lang
-            .map(|l| Language::new(&l))
-            .unwrap_or_else(|| Language::English))
+        Ok(lang.map_or_else(|| Language::English, |l| Language::new(&l)))
     }
 
     fn set_language(&self, language: &Language) -> Result<(), RepositoryError> {

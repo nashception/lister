@@ -1,4 +1,4 @@
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub enum IndexingState {
     Ready,
     CleaningDatabase,
@@ -8,10 +8,7 @@ pub enum IndexingState {
 }
 
 impl IndexingState {
-    pub fn is_indexing(&self) -> bool {
-        matches!(
-            self,
-            IndexingState::CleaningDatabase | IndexingState::Scanning | IndexingState::Saving
-        )
+    pub const fn is_indexing(&self) -> bool {
+        matches!(self, Self::CleaningDatabase | Self::Scanning | Self::Saving)
     }
 }

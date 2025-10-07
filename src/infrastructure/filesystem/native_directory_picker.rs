@@ -1,33 +1,42 @@
 use crate::domain::entities::directory::DirectoryData;
 use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
 use crate::infrastructure::filesystem::directory::directory_data;
-use rfd::AsyncFileDialog;
+
+#[cfg(target_os = "linux")]
+mod linux_runtime {
+    use crate::utils::dialogs::popup_error_and_exit;
+    use std::sync::LazyLock;
+    use tokio::runtime::{Builder, Runtime};
+
+    pub static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+        Builder::new_multi_thread()
+            .enable_io()
+            .build()
+            .unwrap_or_else(|err| popup_error_and_exit(err))
+    });
+}
 
 pub struct NativeDirectoryPicker;
 
-#[async_trait::async_trait]
 impl DirectoryPicker for NativeDirectoryPicker {
-    async fn pick_directory(&self) -> Option<DirectoryData> {
+    fn pick_directory(&self, title: &str) -> Option<DirectoryData> {
         #[cfg(target_os = "linux")]
         {
-            // On Linux, we need a runtime
-            crate::config::constants::TOKIO_RUNTIME.block_on(Self::directory_picker())
+            linux_runtime::TOKIO_RUNTIME.block_on(async {
+                rfd::AsyncFileDialog::new()
+                    .set_title(title)
+                    .pick_folder()
+                    .await
+                    .map(|handle| directory_data(handle.path()))
+            })
         }
 
         #[cfg(target_os = "windows")]
         {
-            // On Windows, can await directly
-            Self::directory_picker().await
+            rfd::FileDialog::new()
+                .set_title(title)
+                .pick_folder()
+                .map(|handle| directory_data(handle.as_path()))
         }
-    }
-}
-
-impl NativeDirectoryPicker {
-    async fn directory_picker() -> Option<DirectoryData> {
-        AsyncFileDialog::new()
-            .set_title("Select Directory to Index")
-            .pick_folder()
-            .await
-            .map(|handle| directory_data(handle.path()))
     }
 }

@@ -21,6 +21,7 @@ pub struct ListerAppService {
 }
 
 impl ListerAppService {
+    #[must_use]
     pub fn create() -> Self {
         // Create the single repository instance
         let repository = Arc::new(
@@ -32,7 +33,7 @@ impl ListerAppService {
         let query_service = Arc::new(FileQueryService::new(repository.clone()));
         let indexing_service = Arc::new(FileIndexingService::new(repository.clone()));
         let language_service =
-            Arc::new(LanguageService::new(repository.clone(), translation_loader));
+            Arc::new(LanguageService::new(repository, translation_loader));
 
         Self {
             query_use_case: query_service,
@@ -42,6 +43,7 @@ impl ListerAppService {
         }
     }
 
+    #[must_use]
     pub fn translations(&self) -> (Language, HashMap<String, String>) {
         let current_language = self
             .language_use_case

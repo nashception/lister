@@ -7,7 +7,7 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             drive: None,
             query: None,
@@ -27,13 +27,13 @@ impl Cache {
         self.results = Some(results);
     }
 
-    pub fn is_valid_for(&self, selected_drive: &Option<String>, query: &str) -> bool {
-        &self.drive == selected_drive && self.query.as_deref() == Some(query)
+    pub fn is_valid_for(&self, selected_drive: Option<&String>, query: &str) -> bool {
+        self.drive.as_ref() == selected_drive && self.query.as_deref() == Some(query)
     }
 
     pub fn get_page(
         &self,
-        selected_drive: &Option<String>,
+        selected_drive: Option<&String>,
         query: &str,
         page_index: usize,
         items_per_page: usize,

@@ -1,4 +1,3 @@
-use crate::ui::utils::translation::tr_impl;
 use iced::widget::{button, row, text, text_input};
 use iced::{Alignment, Element, Length};
 use std::collections::HashMap;
@@ -7,14 +6,14 @@ use crate::tr;
 use crate::ui::messages::read_message::ReadMessage;
 
 pub struct Pagination {
-    pub total_count: i64,
+    pub total_count: u64,
     pub current_page_index: usize,
     pub page_input_value: String,
     pub items_per_page: usize,
 }
 
 impl Pagination {
-    pub fn new(items_per_page: usize) -> Self {
+    pub const fn new(items_per_page: usize) -> Self {
         Self {
             total_count: 0,
             current_page_index: 0,
@@ -23,15 +22,16 @@ impl Pagination {
         }
     }
 
-    pub fn total_pages(&self) -> usize {
+    #[allow(clippy::cast_possible_truncation)]
+    pub const fn total_pages(&self) -> usize {
         if self.total_count == 0 {
             1
         } else {
-            (self.total_count as usize).div_ceil(self.items_per_page)
+            self.total_count.div_ceil(self.items_per_page as u64) as usize
         }
     }
 
-    pub fn navigate_to(&mut self, page_index: usize) -> Option<usize> {
+    pub const fn navigate_to(&mut self, page_index: usize) -> Option<usize> {
         if page_index < self.total_pages() {
             self.current_page_index = page_index;
             Some(page_index)
@@ -40,15 +40,15 @@ impl Pagination {
         }
     }
 
-    pub fn first_page(&mut self) -> Option<usize> {
+    pub const fn first_page(&mut self) -> Option<usize> {
         self.navigate_to(0)
     }
 
-    pub fn last_page(&mut self) -> Option<usize> {
+    pub const fn last_page(&mut self) -> Option<usize> {
         self.navigate_to(self.total_pages().saturating_sub(1))
     }
 
-    pub fn next(&mut self) -> Option<usize> {
+    pub const fn next(&mut self) -> Option<usize> {
         if self.current_page_index + 1 < self.total_pages() {
             self.current_page_index += 1;
             Some(self.current_page_index)
@@ -57,7 +57,7 @@ impl Pagination {
         }
     }
 
-    pub fn prev(&mut self) -> Option<usize> {
+    pub const fn prev(&mut self) -> Option<usize> {
         if self.current_page_index > 0 {
             self.current_page_index -= 1;
             Some(self.current_page_index)
