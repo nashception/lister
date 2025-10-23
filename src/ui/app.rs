@@ -200,7 +200,7 @@ impl ListerApp {
         let language_use_case = self.service.language_use_case.clone();
         Task::perform(
             async move {
-                language_use_case.set_language(language.clone()).ok();
+                language_use_case.set_language(&language).ok();
                 let translations = language_use_case
                     .load_translations(&language)
                     .unwrap_or_default();

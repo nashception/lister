@@ -1,8 +1,23 @@
 use crate::domain::entities::file_entry::FileEntry;
-use crate::domain::errors::scanner_error::DirectoryScannerError;
 use std::fs;
-use std::path::Path;
+use std::io::Error;
+use std::path::{Path, StripPrefixError};
 use walkdir::WalkDir;
+use crate::domain::errors::domain_error::DomainError;
+
+#[derive(Debug, thiserror::Error)]
+pub enum DirectoryScannerError {
+    #[error("Relative path error: {0}")]
+    RelativePath(#[from] StripPrefixError),
+    #[error("File metadata error: {0}")]
+    FileMetadata(#[from] Error),
+}
+
+impl From<DirectoryScannerError> for DomainError {
+    fn from(e: DirectoryScannerError) -> Self {
+        Self::DirectoryScannerError(e.to_string())
+    }
+}
 
 /// Recursively scans a directory and returns a list of [`FileEntry`] values.
 ///

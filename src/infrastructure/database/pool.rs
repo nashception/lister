@@ -1,0 +1,102 @@
+use crate::config::constants::MIGRATIONS;
+use diesel::prelude::*;
+use diesel::r2d2::{ConnectionManager, Pool, PoolError, PooledConnection};
+use diesel::SqliteConnection;
+use diesel_migrations::MigrationHarness;
+use std::sync::Arc;
+use crate::domain::errors::domain_error::DomainError;
+
+type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
+pub type DieselConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum RepositoryError {
+    #[error("Database error: {0}")]
+    Database(#[from] diesel::result::Error),
+    #[error("Connection pool error: {0}")]
+    ConnectionPool(#[from] PoolError),
+    #[error("Migration error: {0}")]
+    Migration(String),
+}
+
+impl From<RepositoryError> for DomainError {
+    fn from(e: RepositoryError) -> Self {
+        Self::RepositoryFailure(e.to_string())
+    }
+}
+
+/// Core database pool and infrastructure for `SQLite` repositories.
+///
+/// Handles connection pooling, foreign key constraints, and migrations.
+/// Shared across specialized repositories via `Arc`.
+pub struct SqliteRepositoryPool {
+    pool: DieselPool,
+}
+
+impl SqliteRepositoryPool {
+    /// Creates a new [`SqliteRepositoryPool`] using the given database URL.
+    ///
+    /// Initializes the connection pool, enables foreign keys,
+    /// and runs all pending migrations.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while creating the connection pool.
+    /// - A [`Database`](RepositoryError::Database) error occurs while enabling foreign keys.
+    /// - A [`Migration`](RepositoryError::Migration) error occurs while running migrations.
+    pub fn new(database_url: &str) -> Result<Arc<Self>, RepositoryError> {
+        let pool = Self::create_pool(database_url)?;
+        Self::enable_foreign_keys(&pool)?;
+        Self::run_migrations(&pool)?;
+        Ok(Arc::new(Self { pool }))
+    }
+
+    fn create_pool(database_url: &str) -> Result<DieselPool, RepositoryError> {
+        let manager = ConnectionManager::<SqliteConnection>::new(database_url);
+        Pool::builder()
+            .build(manager)
+            .map_err(RepositoryError::ConnectionPool)
+    }
+
+    fn enable_foreign_keys(pool: &DieselPool) -> Result<(), RepositoryError> {
+        let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
+        diesel::sql_query("PRAGMA foreign_keys = ON")
+            .execute(&mut conn)
+            .map_err(RepositoryError::Database)?;
+        Ok(())
+    }
+
+    fn run_migrations(pool: &DieselPool) -> Result<(), RepositoryError> {
+        let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
+        conn.run_pending_migrations(MIGRATIONS)
+            .map_err(|err| RepositoryError::Migration(err.to_string()))?;
+        Ok(())
+    }
+
+    /// Gets a connection from the pool.
+    pub(crate) fn get_connection(&self) -> Result<DieselConnection, RepositoryError> {
+        self.pool.get().map_err(RepositoryError::ConnectionPool)
+    }
+
+    /// Executes a database operation with automatic connection management.
+    pub(crate) fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    where
+        F: FnOnce(&mut DieselConnection) -> Result<R, RepositoryError>,
+    {
+        let mut conn = self.get_connection()?;
+        operation(&mut conn)
+    }
+
+    /// Executes a database operation within an immediate transaction.
+    ///
+    /// Note: The closure receives `&mut SqliteConnection` directly because
+    /// `immediate_transaction` dereferences the pooled connection.
+    pub(crate) fn execute_in_transaction<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    where
+        F: FnOnce(&mut SqliteConnection) -> Result<R, RepositoryError>,
+    {
+        let mut conn = self.get_connection()?;
+        conn.immediate_transaction(|conn| operation(conn))
+    }
+}

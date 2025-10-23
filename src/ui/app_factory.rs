@@ -1,12 +1,11 @@
+use crate::application::file_indexing_service::FileIndexingService;
+use crate::application::file_query_service::FileQueryService;
+use crate::application::language_service::LanguageService;
 use crate::domain::entities::language::Language;
-use crate::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
-use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
-use crate::domain::ports::primary::language_use_case::LanguageManagementUseCase;
-use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
-use crate::domain::services::file_indexing_service::FileIndexingService;
-use crate::domain::services::file_query_service::FileQueryService;
-use crate::domain::services::language_service::LanguageService;
-use crate::infrastructure::database::sqlite_repository::SqliteFileRepository;
+use crate::infrastructure::database::command_repository::CommandRepository;
+use crate::infrastructure::database::language_repository::LanguageRepository;
+use crate::infrastructure::database::pool::SqliteRepositoryPool;
+use crate::infrastructure::database::query_repository::QueryRepository;
 use crate::infrastructure::filesystem::native_directory_picker::NativeDirectoryPicker;
 use crate::infrastructure::i18n::json_translation_loader::JsonTranslationLoader;
 use crate::utils::dialogs::popup_error_and_exit;
@@ -14,26 +13,30 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct ListerAppService {
-    pub query_use_case: Arc<dyn FileQueryUseCase>,
-    pub indexing_use_case: Arc<dyn FileIndexingUseCase>,
-    pub language_use_case: Arc<dyn LanguageManagementUseCase>,
-    pub directory_picker: Arc<dyn DirectoryPicker>,
+    pub query_use_case: Arc<FileQueryService>,
+    pub indexing_use_case: Arc<FileIndexingService>,
+    pub language_use_case: Arc<LanguageService>,
+    pub directory_picker: Arc<NativeDirectoryPicker>,
 }
 
 impl ListerAppService {
     #[must_use]
     pub fn create() -> Self {
-        // Create the single repository instance
-        let repository = Arc::new(
-            SqliteFileRepository::new("app.db").unwrap_or_else(|error| popup_error_and_exit(error)),
-        );
-        let translation_loader = Arc::new(JsonTranslationLoader);
         let directory_picker = Arc::new(NativeDirectoryPicker);
 
-        let query_service = Arc::new(FileQueryService::new(repository.clone()));
-        let indexing_service = Arc::new(FileIndexingService::new(repository.clone()));
-        let language_service =
-            Arc::new(LanguageService::new(repository, translation_loader));
+        let pool =
+            SqliteRepositoryPool::new("app.db").unwrap_or_else(|error| popup_error_and_exit(error));
+
+        let query_repository = QueryRepository::new(Arc::clone(&pool));
+        let command_repository = CommandRepository::new(Arc::clone(&pool));
+        let language_repository = LanguageRepository::new(pool);
+
+        let query_service = Arc::new(FileQueryService::new(query_repository));
+        let indexing_service = Arc::new(FileIndexingService::new(command_repository));
+        let language_service = Arc::new(LanguageService::new(
+            language_repository,
+            JsonTranslationLoader,
+        ));
 
         Self {
             query_use_case: query_service,

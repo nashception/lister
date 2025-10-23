@@ -1,23 +1,24 @@
 use chrono::Local;
+use lister::application::file_indexing_service::FileIndexingService;
+use lister::application::file_query_service::FileQueryService;
+use lister::application::language_service::LanguageService;
 use lister::domain::entities::file_entry::FileEntry;
 use lister::domain::entities::language::Language;
-use lister::domain::ports::primary::file_indexing_use_case::FileIndexingUseCase;
-use lister::domain::ports::primary::file_query_use_case::FileQueryUseCase;
-use lister::domain::ports::primary::language_use_case::LanguageManagementUseCase;
-use lister::domain::services::file_indexing_service::FileIndexingService;
-use lister::domain::services::file_query_service::FileQueryService;
-use lister::domain::services::language_service::LanguageService;
-use lister::infrastructure::database::sqlite_repository::SqliteFileRepository;
+use lister::infrastructure::database::command_repository::CommandRepository;
+use lister::infrastructure::database::language_repository::LanguageRepository;
+use lister::infrastructure::database::pool::SqliteRepositoryPool;
+use lister::infrastructure::database::query_repository::QueryRepository;
 use lister::infrastructure::i18n::json_translation_loader::JsonTranslationLoader;
+use lister::utils::dialogs::popup_error_and_exit;
 use std::sync::Arc;
 use tempfile::TempDir;
 
 // Test helpers and fixtures
 struct TestFixture {
     _temp_dir: TempDir, // Store it to prevent its disposal
-    query_service: Arc<dyn FileQueryUseCase>,
-    indexing_service: Arc<dyn FileIndexingUseCase>,
-    language_service: Arc<dyn LanguageManagementUseCase>,
+    query_service: Arc<FileQueryService>,
+    indexing_service: Arc<FileIndexingService>,
+    language_service: Arc<LanguageService>,
 }
 
 impl TestFixture {
@@ -26,13 +27,19 @@ impl TestFixture {
         let db_path = temp_dir.path().join("test.db");
         let db_url = format!("sqlite://{}", db_path.display());
 
-        let repo =
-            Arc::new(SqliteFileRepository::new(&db_url).expect("Failed to create test database"));
+        let pool =
+            SqliteRepositoryPool::new(&db_url).unwrap_or_else(|error| popup_error_and_exit(error));
 
-        let query_service = Arc::new(FileQueryService::new(repo.clone()));
-        let indexing_service = Arc::new(FileIndexingService::new(repo.clone()));
-        let translation_loader = Arc::new(JsonTranslationLoader);
-        let language_service = Arc::new(LanguageService::new(repo, translation_loader));
+        let query_repository = QueryRepository::new(Arc::clone(&pool));
+        let command_repository = CommandRepository::new(Arc::clone(&pool));
+        let language_repository = LanguageRepository::new(pool);
+
+        let query_service = Arc::new(FileQueryService::new(query_repository));
+        let indexing_service = Arc::new(FileIndexingService::new(command_repository));
+        let language_service = Arc::new(LanguageService::new(
+            language_repository,
+            JsonTranslationLoader,
+        ));
 
         Self {
             _temp_dir: temp_dir,
@@ -529,7 +536,7 @@ fn test_language_management_workflow() {
     let french = Language::French;
     fixture
         .language_service
-        .set_language(french)
+        .set_language(&french)
         .expect("Failed to set language");
 
     let current_lang = fixture.language_service.get_current_language().unwrap();
@@ -689,9 +696,7 @@ fn test_search_performance_with_large_dataset() {
     let elapsed = start.elapsed();
 
     // Ensure reasonable performance (adjust threshold as needed)
-    assert!(
-        elapsed.as_millis() < 1000
-    );
+    assert!(elapsed.as_millis() < 1000);
     assert!(!search_result.is_empty());
 
     // Test pagination performance

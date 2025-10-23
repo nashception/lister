@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::application::file_query_service::FileQueryService;
 use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
 use crate::domain::entities::file_entry::FileWithMetadata;
 use crate::domain::entities::language::Language;
 use crate::domain::entities::pagination::PaginatedResult;
-use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
 use crate::tr;
 use crate::ui::components::read::cache::Cache;
 use crate::ui::components::read::drive_combo_box::DriveComboBox;
@@ -19,7 +19,7 @@ use iced::widget::{column, row};
 use iced::{keyboard, Element, Subscription, Task};
 
 pub struct ReadPage {
-    query_use_case: Arc<dyn FileQueryUseCase>,
+    query_use_case: Arc<FileQueryService>,
     drive_combo_box: DriveComboBox,
     search: Search,
     pagination: Pagination,
@@ -29,7 +29,7 @@ pub struct ReadPage {
 }
 
 impl ReadPage {
-    pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
+    pub fn new(query_use_case: Arc<FileQueryService>) -> (Self, Task<ReadMessage>) {
         let (drive_combo_box, combo_box_task) = DriveComboBox::new(query_use_case.clone());
         let (search, search_task) = Search::new();
         let page = Self {
@@ -161,10 +161,10 @@ impl ReadPage {
             return self.file_list.snap_to_top();
         }
 
-        if !self
-            .cache
-            .is_valid_for(self.drive_combo_box.selected_drive.as_ref(), &self.search.query)
-        {
+        if !self.cache.is_valid_for(
+            self.drive_combo_box.selected_drive.as_ref(),
+            &self.search.query,
+        ) {
             self.cache.clear();
         }
 
