@@ -1,9 +1,18 @@
 use crate::utils::dialogs::{popup_error, popup_info};
 use self_update::backends::github::Update;
-use std::env;
-use std::error::Error;
 use std::path::PathBuf;
 use std::process::{exit, Command};
+use std::{env, io};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum UpdateError {
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+
+    #[error("Self-update error: {0}")]
+    SelfUpdate(#[from] self_update::errors::Error),
+}
 
 pub fn self_update() {
     let exe_path = match env::current_exe() {
@@ -30,7 +39,7 @@ pub fn self_update() {
     }
 }
 
-fn try_update() -> Result<String, Box<dyn Error>> {
+fn try_update() -> Result<String, UpdateError> {
     let status = Update::configure()
         .repo_owner("nashception")
         .repo_name("lister")
@@ -49,7 +58,7 @@ fn try_update() -> Result<String, Box<dyn Error>> {
     Ok(new_version)
 }
 
-fn restart(exe_path: PathBuf) -> Result<(), Box<dyn Error>> {
+fn restart(exe_path: PathBuf) -> Result<(), UpdateError> {
     Command::new(exe_path).arg("--updated").spawn()?;
 
     exit(0);

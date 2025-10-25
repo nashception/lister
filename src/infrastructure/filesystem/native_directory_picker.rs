@@ -1,5 +1,4 @@
 use crate::domain::entities::directory::DirectoryData;
-use crate::domain::ports::secondary::directory_picker::DirectoryPicker;
 use crate::infrastructure::filesystem::directory::directory_data;
 
 #[cfg(target_os = "linux")]
@@ -18,8 +17,8 @@ mod linux_runtime {
 
 pub struct NativeDirectoryPicker;
 
-impl DirectoryPicker for NativeDirectoryPicker {
-    fn pick_directory(&self, title: &str) -> Option<DirectoryData> {
+impl NativeDirectoryPicker {
+    pub fn pick_directory(&self, title: &str) -> Option<DirectoryData> {
         #[cfg(target_os = "linux")]
         {
             linux_runtime::TOKIO_RUNTIME.block_on(async {

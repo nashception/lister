@@ -1,4 +1,4 @@
-use crate::domain::ports::primary::file_query_use_case::FileQueryUseCase;
+use crate::application::file_query_service::FileQueryService;
 use crate::tr;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::utils::dialogs::popup_error;
@@ -13,7 +13,7 @@ pub struct DriveComboBox {
 }
 
 impl DriveComboBox {
-    pub fn new(query_use_case: Arc<dyn FileQueryUseCase>) -> (Self, Task<ReadMessage>) {
+    pub fn new(query_use_case: Arc<FileQueryService>) -> (Self, Task<ReadMessage>) {
         (
             Self {
                 drives: vec![],
@@ -21,12 +21,10 @@ impl DriveComboBox {
             },
             Task::perform(
                 async move {
-                    query_use_case
-                        .list_drive_names()
-                        .unwrap_or_else(|err| {
-                            popup_error(err);
-                            vec![]
-                        })
+                    query_use_case.list_drive_names().unwrap_or_else(|err| {
+                        popup_error(err);
+                        vec![]
+                    })
                 },
                 ReadMessage::DrivesFetched,
             ),

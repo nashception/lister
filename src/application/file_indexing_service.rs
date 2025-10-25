@@ -1,8 +1,21 @@
+use crate::application::directory_scanner;
+use crate::domain::entities::category::Category;
+use crate::domain::entities::drive::{Drive, DriveToDelete};
 use crate::domain::entities::file_entry::FileEntry;
 use crate::domain::errors::domain_error::DomainError;
+use crate::infrastructure::database::command_repository::CommandRepository;
 use std::path::Path;
 
-pub trait FileIndexingUseCase: Send + Sync {
+pub struct FileIndexingService {
+    command_repo: CommandRepository,
+}
+
+impl FileIndexingService {
+    #[must_use]
+    pub const fn new(command_repo: CommandRepository) -> Self {
+        Self { command_repo }
+    }
+
     /// Removes duplicate file entries for the given category and drive.
     ///
     /// Deletes all existing records in the database that match the specified
@@ -12,7 +25,11 @@ pub trait FileIndexingUseCase: Send + Sync {
     ///
     /// Returns a [`DomainError`] if:
     /// - A [`Repository`](DomainError::Repository) error occurs while removing duplicates.
-    fn remove_duplicates(&self, category: String, drive: String) -> Result<(), DomainError>;
+    pub fn remove_duplicates(&self, category: String, drive: String) -> Result<(), DomainError> {
+        self.command_repo
+            .remove_duplicates(Category { name: category }, DriveToDelete { name: drive })?;
+        Ok(())
+    }
 
     /// Scans the specified directory for files.
     ///
@@ -22,7 +39,10 @@ pub trait FileIndexingUseCase: Send + Sync {
     ///
     /// Returns a [`DomainError`] if:
     /// - A [`DirectoryScannerError`](DomainError::DirectoryScannerError) occurs during file system traversal.
-    fn scan_directory(&self, directory: &Path) -> Result<Vec<FileEntry>, DomainError>;
+    pub fn scan_directory(&self, directory: &Path) -> Result<Vec<FileEntry>, DomainError> {
+        let files = directory_scanner::scan_directory(directory)?;
+        Ok(files)
+    }
 
     /// Inserts scanned files into the database.
     ///
@@ -33,11 +53,21 @@ pub trait FileIndexingUseCase: Send + Sync {
     ///
     /// Returns a [`DomainError`] if:
     /// - A [`Repository`](DomainError::Repository) error occurs during the insert operation.
-    fn insert_in_database(
+    pub fn insert_in_database(
         &self,
         category: String,
         drive: String,
-        drive_remaining_space: u64,
+        drive_available_space: u64,
         files: Vec<FileEntry>,
-    ) -> Result<usize, DomainError>;
+    ) -> Result<usize, DomainError> {
+        let files_count = self.command_repo.save(
+            Category { name: category },
+            Drive {
+                name: drive,
+                available_space: drive_available_space,
+            },
+            files,
+        )?;
+        Ok(files_count)
+    }
 }
