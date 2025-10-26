@@ -2,15 +2,15 @@ use diesel::{allow_tables_to_appear_in_same_query, joinable, table};
 
 table! {
     file_categories (id) {
-        id -> Integer,
+        id -> Text,
         name -> Text,
     }
 }
 
 table! {
     drive_entries (id) {
-        id -> Integer,
-        category_id -> Integer,
+        id -> Text,
+        category_id -> Text,
         name -> Text,
         available_space -> BigInt,
         insertion_time -> Timestamp,
@@ -19,8 +19,8 @@ table! {
 
 table! {
     file_entries (id) {
-        id -> Integer,
-        drive_id -> Integer,
+        id -> Text,
+        drive_id -> Text,
         path -> Text,
         weight -> BigInt,
     }
