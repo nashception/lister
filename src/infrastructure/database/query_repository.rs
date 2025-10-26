@@ -122,14 +122,7 @@ impl QueryRepository {
 
             let items = entities
                 .into_iter()
-                .map(|dto| FileWithMetadata {
-                    category_name: dto.category_name,
-                    drive_name: dto.drive_name,
-                    drive_available_space: dto.drive_available_space.to_u64_or_zero(),
-                    drive_insertion_time: dto.drive_insertion_time,
-                    path: dto.path,
-                    size_bytes: dto.weight.to_u64_or_zero(),
-                })
+                .map(FileWithMetadataDto::into)
                 .collect();
 
             Ok(items)
