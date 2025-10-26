@@ -10,7 +10,9 @@ use lister::infrastructure::database::pool::SqliteRepositoryPool;
 use lister::infrastructure::database::query_repository::QueryRepository;
 use lister::infrastructure::i18n::json_translation_loader::JsonTranslationLoader;
 use lister::utils::dialogs::popup_error_and_exit;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Instant;
 use tempfile::TempDir;
 
 // Test helpers and fixtures
@@ -593,14 +595,12 @@ fn test_multiple_categories_and_drives() {
     assert_eq!(all_files.len(), 12); // 4 files × 3 locations
 
     // Verify different categories exist
-    let categories: std::collections::HashSet<_> =
-        all_files.iter().map(|f| f.category_name.clone()).collect();
+    let categories: HashSet<_> = all_files.iter().map(|f| f.category_name.clone()).collect();
     assert!(categories.contains("Work"));
     assert!(categories.contains("Personal"));
 
     // Verify different drives exist
-    let drives: std::collections::HashSet<_> =
-        all_files.iter().map(|f| f.drive_name.clone()).collect();
+    let drives: HashSet<_> = all_files.iter().map(|f| f.drive_name.clone()).collect();
     assert!(drives.contains("Laptop"));
     assert!(drives.contains("Desktop"));
     assert!(drives.contains("Server"));
@@ -685,7 +685,7 @@ fn test_search_performance_with_large_dataset() {
         )
         .expect("Large dataset indexing failed");
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
 
     // Test search performance
     let search_result = fixture
@@ -700,7 +700,7 @@ fn test_search_performance_with_large_dataset() {
     assert!(!search_result.is_empty());
 
     // Test pagination performance
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let page_result = fixture
         .query_service
         .search_files(&None, &None, 50, 100)

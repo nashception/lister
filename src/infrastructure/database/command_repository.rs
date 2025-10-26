@@ -11,6 +11,7 @@ use chrono::Local;
 use diesel::dsl::{exists, update};
 use diesel::prelude::*;
 use diesel::{QueryDsl, RunQueryDsl, SqliteConnection};
+use rayon::prelude::*;
 use std::sync::Arc;
 
 /// Repository for write operations on files, drives, and categories.
@@ -141,7 +142,7 @@ impl CommandRepository {
         conn: &mut SqliteConnection,
     ) -> Result<usize, RepositoryError> {
         let dto_files: Vec<NewFileEntryDto> = files
-            .into_iter()
+            .into_par_iter()
             .map(|f| NewFileEntryDto {
                 drive_id,
                 path: f.path,
