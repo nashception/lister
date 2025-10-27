@@ -5,7 +5,7 @@ use diesel::{Associations, Identifiable, Insertable, Queryable};
 #[derive(Debug, Clone, PartialEq, Queryable, Identifiable)]
 #[diesel(table_name = file_categories)]
 struct FileCategoryEntity {
-    id: i32,
+    id: String,
     name: String,
 }
 
@@ -13,7 +13,7 @@ struct FileCategoryEntity {
 #[diesel(belongs_to(FileCategoryEntity, foreign_key = category_id))]
 #[diesel(table_name = drive_entries)]
 struct DriveEntryEntity {
-    id: i32,
+    id: String,
     category_id: i32,
     name: String,
     remaining_space: i64,
@@ -24,7 +24,7 @@ struct DriveEntryEntity {
 #[diesel(belongs_to(DriveEntryEntity, foreign_key = drive_id))]
 #[diesel(table_name = file_entries)]
 struct FileEntryEntity {
-    id: i32,
+    id: String,
     drive_id: i32,
     path: String,
     weight: i64,
@@ -43,13 +43,15 @@ pub struct FileWithMetadataDto {
 #[derive(Insertable)]
 #[diesel(table_name = file_categories)]
 pub struct NewFileCategoryDto {
+    pub id: String,
     pub name: String,
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = drive_entries)]
 pub struct NewDriveEntryDto {
-    pub category_id: i32,
+    pub id: String,
+    pub category_id: String,
     pub name: String,
     pub available_space: i64,
     pub insertion_time: NaiveDateTime,
@@ -58,7 +60,8 @@ pub struct NewDriveEntryDto {
 #[derive(Insertable)]
 #[diesel(table_name = file_entries)]
 pub struct NewFileEntryDto {
-    pub drive_id: i32,
+    pub id: String,
+    pub drive_id: String,
     pub path: String,
     pub weight: i64,
 }
