@@ -19,6 +19,26 @@ impl QueryRepository {
         Self { pool }
     }
 
+    /// Retrieves all distinct categories from the database.
+    ///
+    /// Returns a sorted list of unique categories.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during query execution.
+    pub fn find_all_categories(&self) -> Result<Vec<String>, RepositoryError> {
+        self.pool.execute_db_operation(|conn| {
+            let categories = file_categories::table
+                .select(file_categories::name)
+                .distinct()
+                .order(file_categories::name)
+                .load::<String>(conn)?;
+            Ok(categories)
+        })
+    }
+
     /// Retrieves all distinct drive names from the database.
     ///
     /// Returns a sorted list of unique drive names.

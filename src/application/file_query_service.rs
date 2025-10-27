@@ -12,6 +12,19 @@ impl FileQueryService {
         Self { query_repo }
     }
 
+    /// Retrieves all available categories.
+    ///
+    /// Returns a list of distinct categories accessible in the system.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DomainError`] if:
+    /// - A [`Repository`](DomainError::Repository) error occurs while fetching categories from storage.
+    pub fn list_categories(&self) -> Result<Vec<String>, DomainError> {
+        let drives = self.query_repo.find_all_categories()?;
+        Ok(drives)
+    }
+
     /// Retrieves all available drive names.
     ///
     /// Returns a list of distinct drive names accessible in the system.
