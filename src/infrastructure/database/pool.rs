@@ -33,6 +33,26 @@ pub struct SqliteRepositoryPool {
 }
 
 impl SqliteRepositoryPool {
+    /// Creates a new [`SqliteRepositoryPool`] instance and initializes the database connection.
+    ///
+    /// This function sets up a connection pool to the database, enables foreign key
+    /// constraints, applies necessary `SQLite` PRAGMA settings, and runs any pending
+    /// database migrations before returning a fully initialized repository instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while creating or acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during database initialization.
+    /// - A [`Migration`](RepositoryError::Migration) error occurs while applying migrations.
+    ///
+    /// # Parameters
+    ///
+    /// - `database_url`: The database connection URL (e.g., path to the `SQLite` database file).
+    ///
+    /// # Returns
+    ///
+    /// Returns an [`Arc`] pointing to the initialized [`SqliteRepositoryPool`] instance upon success.
     pub fn new(database_url: &str) -> Result<Arc<Self>, RepositoryError> {
         let pool = Self::create_pool(database_url)?;
         {
@@ -80,13 +100,42 @@ impl SqliteRepositoryPool {
         Ok(())
     }
 
-    /// Gets a connection from the pool.
-    pub(crate) fn get_connection(&self) -> Result<DieselConnection, RepositoryError> {
+    /// Retrieves a single database connection from the internal connection pool.
+    ///
+    /// This function is typically used internally by repository methods or
+    /// transactional helpers to acquire a managed database connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    ///
+    /// # Returns
+    ///
+    /// Returns a pooled [`DieselConnection`] on success.
+    pub fn get_connection(&self) -> Result<DieselConnection, RepositoryError> {
         self.pool.get().map_err(RepositoryError::ConnectionPool)
     }
 
     /// Executes a database operation with automatic connection management.
-    pub(crate) fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    ///
+    /// This function acquires a connection from the pool, executes the provided
+    /// closure with it, and automatically handles connection release afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during the operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `operation`: A closure that performs the desired database action using a mutable reference to the connection.
+    ///
+    /// # Returns
+    ///
+    /// Returns the result of the provided operation if successful.
+    pub fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
     where
         F: FnOnce(&mut DieselConnection) -> Result<R, RepositoryError>,
     {
@@ -94,11 +143,28 @@ impl SqliteRepositoryPool {
         operation(&mut conn)
     }
 
-    /// Executes a database operation within an immediate transaction.
+    /// Executes a database operation within an **immediate transaction**.
     ///
-    /// Note: The closure receives `&mut SqliteConnection` directly because
-    /// `immediate_transaction` dereferences the pooled connection.
-    pub(crate) fn execute_in_transaction<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    /// The provided closure runs within a single transactional context.
+    /// If the operation returns an error, the transaction is automatically rolled back.
+    ///
+    /// This is particularly useful for ensuring atomic updates across multiple
+    /// database statements or operations that must succeed or fail as a unit.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during the transaction.
+    ///
+    /// # Parameters
+    ///
+    /// - `operation`: A closure that performs the transactional work on the provided connection.
+    ///
+    /// # Returns
+    ///
+    /// Returns the result of the transaction closure upon success.
+    pub fn execute_in_transaction<F, R>(&self, operation: F) -> Result<R, RepositoryError>
     where
         F: FnOnce(&mut SqliteConnection) -> Result<R, RepositoryError>,
     {
