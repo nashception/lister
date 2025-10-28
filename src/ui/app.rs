@@ -1,4 +1,4 @@
-use crate::domain::entities::language::Language;
+use crate::domain::model::language::Language;
 use crate::tr;
 use crate::ui::app_factory::ListerAppService;
 use crate::ui::messages::app_message::AppMessage;

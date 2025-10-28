@@ -1,4 +1,4 @@
-use crate::domain::entities::file_entry::FileWithMetadata;
+use crate::domain::model::file_entry::FileWithMetadata;
 use crate::infrastructure::database::conversion::{ToI64, ToU64};
 use crate::infrastructure::database::entities::FileWithMetadataDto;
 use crate::infrastructure::database::pool::{RepositoryError, SqliteRepositoryPool};

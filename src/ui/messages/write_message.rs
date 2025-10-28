@@ -1,5 +1,5 @@
-use crate::domain::entities::directory::DirectoryData;
-use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::model::directory::DirectoryData;
+use crate::domain::model::file_entry::FileEntry;
 
 #[derive(Clone, Debug)]
 pub enum WriteMessage {

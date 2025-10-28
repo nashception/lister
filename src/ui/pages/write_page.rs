@@ -1,5 +1,5 @@
 use crate::application::file_indexing_service::FileIndexingService;
-use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::model::file_entry::FileEntry;
 use crate::infrastructure::filesystem::native_directory_picker::NativeDirectoryPicker;
 use crate::tr;
 use crate::ui::components::write::indexing::IndexingState;

@@ -1,4 +1,4 @@
-use crate::domain::entities::file_entry::FileWithMetadata;
+use crate::domain::model::file_entry::FileWithMetadata;
 use crate::domain::errors::domain_error::DomainError;
 use crate::infrastructure::database::query_repository::QueryRepository;
 

@@ -1,4 +1,4 @@
-use crate::domain::entities::directory::DirectoryData;
+use crate::domain::model::directory::DirectoryData;
 use crate::infrastructure::filesystem::directory::directory_data;
 
 #[cfg(target_os = "linux")]

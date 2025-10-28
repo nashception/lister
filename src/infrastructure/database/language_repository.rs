@@ -1,4 +1,4 @@
-use crate::domain::entities::language::Language;
+use crate::domain::model::language::Language;
 use crate::infrastructure::database::pool::{RepositoryError, SqliteRepositoryPool};
 use crate::infrastructure::database::schema::settings;
 use diesel::prelude::*;

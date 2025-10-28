@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use crate::application::file_query_service::FileQueryService;
 use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
-use crate::domain::entities::file_entry::FileWithMetadata;
-use crate::domain::entities::language::Language;
-use crate::domain::entities::pagination::PaginatedResult;
+use crate::domain::model::file_entry::FileWithMetadata;
+use crate::domain::model::language::Language;
+use crate::domain::model::pagination::PaginatedResult;
 use crate::tr;
 use crate::ui::components::read::cache::Cache;
 use crate::ui::components::read::drive_combo_box::DriveComboBox;

@@ -1,5 +1,5 @@
-use crate::domain::entities::file_entry::FileWithMetadata;
-use crate::domain::entities::language::Language;
+use crate::domain::model::file_entry::FileWithMetadata;
+use crate::domain::model::language::Language;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::ui::utils::format_date_time::format_date_time;
 use humansize::{format_size, DECIMAL};

@@ -1,4 +1,4 @@
-use crate::domain::entities::language::Language;
+use crate::domain::model::language::Language;
 use crate::domain::errors::domain_error::DomainError;
 use crate::infrastructure::database::language_repository::LanguageRepository;
 use crate::infrastructure::i18n::json_translation_loader::JsonTranslationLoader;

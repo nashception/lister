@@ -1,4 +1,4 @@
-use crate::domain::entities::file_entry::FileWithMetadata;
+use crate::domain::model::file_entry::FileWithMetadata;
 use crate::infrastructure::database::entities::FileWithMetadataDto;
 
 pub trait ToI64 {

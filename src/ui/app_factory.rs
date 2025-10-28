@@ -1,7 +1,7 @@
 use crate::application::file_indexing_service::FileIndexingService;
 use crate::application::file_query_service::FileQueryService;
 use crate::application::language_service::LanguageService;
-use crate::domain::entities::language::Language;
+use crate::domain::model::language::Language;
 use crate::infrastructure::database::command_repository::CommandRepository;
 use crate::infrastructure::database::language_repository::LanguageRepository;
 use crate::infrastructure::database::pool::SqliteRepositoryPool;

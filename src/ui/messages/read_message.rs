@@ -1,4 +1,4 @@
-use crate::domain::entities::pagination::PaginatedResult;
+use crate::domain::model::pagination::PaginatedResult;
 
 #[derive(Clone, Debug)]
 pub enum ReadMessage {
