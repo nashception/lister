@@ -10,9 +10,8 @@ compile_error!("This application only supports Linux and Windows");
 fn main() -> iced::Result {
     self_update();
 
-    let service = ListerAppService::create();
-    iced::application(ListerApp::title, ListerApp::update, ListerApp::view)
-        .subscription(ListerApp::subscription)
+    iced::application(|| ListerApp::new(ListerAppService::create()), ListerApp::update, ListerApp::view)
+        .subscription(|state| state.subscription())
         .window(ListerApp::window())
-        .run_with(|| ListerApp::new(service))
+        .run()
 }

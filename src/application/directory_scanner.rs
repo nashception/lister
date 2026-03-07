@@ -1,4 +1,4 @@
-use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::model::file_entry::FileEntry;
 use crate::domain::errors::domain_error::DomainError;
 use jwalk::{DirEntry, WalkDir};
 use std::path::{Path, StripPrefixError};

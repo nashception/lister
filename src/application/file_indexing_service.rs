@@ -1,7 +1,7 @@
 use crate::application::directory_scanner;
-use crate::domain::entities::category::Category;
-use crate::domain::entities::drive::{Drive, DriveToDelete};
-use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::model::category::Category;
+use crate::domain::model::drive::{Drive, DriveToDelete};
+use crate::domain::model::file_entry::FileEntry;
 use crate::domain::errors::domain_error::DomainError;
 use crate::infrastructure::database::command_repository::CommandRepository;
 use std::path::Path;

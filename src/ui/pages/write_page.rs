@@ -1,11 +1,11 @@
 use crate::application::file_indexing_service::FileIndexingService;
-use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::model::file_entry::FileEntry;
 use crate::infrastructure::filesystem::native_directory_picker::NativeDirectoryPicker;
 use crate::tr;
 use crate::ui::components::write::indexing::IndexingState;
 use crate::ui::messages::write_message::WriteMessage;
 use crate::utils::dialogs::{popup_error, popup_error_and_exit};
-use iced::widget::{button, column, container, row, text, text_input, Rule};
+use iced::widget::{button, column, container, row, rule, text, text_input};
 use iced::{Alignment, Element, Length, Task};
 use iced_aw::Spinner;
 use std::collections::HashMap;
@@ -131,7 +131,7 @@ impl WritePage {
             text(tr!(translations, "file_indexing_setup"))
                 .size(24)
                 .style(text::primary),
-            Rule::horizontal(1),
+            rule::horizontal(1),
             directory_section,
             column![
                 text(tr!(translations, "category_label")).size(16),
@@ -151,7 +151,7 @@ impl WritePage {
         let directory_label = text(tr!(translations, "directory_label")).size(16);
 
         let directory_display = self.write_data.directory.as_ref()
-            .map_or_else(|| text(tr!(translations, "no_directory_selected")).style(text::secondary), |dir| 
+            .map_or_else(|| text(tr!(translations, "no_directory_selected")).style(text::secondary), |dir|
             text(tr!(translations, "selected_directory", "dir" => &dir.display().to_string()))
                 .style(text::success))
         .width(Length::Fill);
@@ -186,7 +186,7 @@ impl WritePage {
         }
         .width(Length::Fill);
 
-        column![Rule::horizontal(1), row![requirements_text, submit_button]]
+        column![rule::horizontal(1), row![requirements_text, submit_button]]
             .spacing(10)
             .into()
     }

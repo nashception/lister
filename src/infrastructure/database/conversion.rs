@@ -1,4 +1,4 @@
-use crate::domain::entities::file_entry::FileWithMetadata;
+use crate::domain::model::file_entry::FileWithMetadata;
 use crate::infrastructure::database::entities::FileWithMetadataDto;
 
 pub trait ToI64 {
@@ -23,7 +23,7 @@ impl ToU64 for i64 {
 
 impl From<FileWithMetadataDto> for FileWithMetadata {
     fn from(dto: FileWithMetadataDto) -> Self {
-        FileWithMetadata {
+        Self {
             category_name: dto.category_name,
             drive_name: dto.drive_name,
             drive_available_space: dto.drive_available_space.to_u64_or_zero(),

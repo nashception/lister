@@ -1,6 +1,6 @@
-use crate::domain::entities::category::Category;
-use crate::domain::entities::drive::{Drive, DriveToDelete};
-use crate::domain::entities::file_entry::FileEntry;
+use crate::domain::model::category::Category;
+use crate::domain::model::drive::{Drive, DriveToDelete};
+use crate::domain::model::file_entry::FileEntry;
 use crate::infrastructure::database::conversion::ToI64;
 use crate::infrastructure::database::entities::{
     NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,

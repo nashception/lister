@@ -1,4 +1,4 @@
-use crate::domain::entities::directory::DirectoryData;
+use crate::domain::model::directory::DirectoryData;
 use crate::utils::dialogs::popup_error_and_exit;
 use std::path::Path;
 use sysinfo::{DiskRefreshKind, Disks};

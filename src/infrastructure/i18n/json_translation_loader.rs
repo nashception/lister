@@ -1,4 +1,4 @@
-use crate::domain::entities::language::Language;
+use crate::domain::model::language::Language;
 use std::collections::HashMap;
 
 pub struct JsonTranslationLoader;

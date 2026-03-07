@@ -1,4 +1,4 @@
-use crate::domain::entities::language::Language;
+use crate::domain::model::language::Language;
 use chrono::NaiveDateTime;
 
 pub fn format_date_time(date_time: NaiveDateTime, language: &Language) -> String {

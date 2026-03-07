@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use crate::application::file_query_service::FileQueryService;
 use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
-use crate::domain::entities::file_entry::FileWithMetadata;
-use crate::domain::entities::language::Language;
-use crate::domain::entities::pagination::PaginatedResult;
+use crate::domain::model::file_entry::FileWithMetadata;
+use crate::domain::model::language::Language;
+use crate::domain::model::pagination::PaginatedResult;
 use crate::tr;
 use crate::ui::components::read::cache::Cache;
 use crate::ui::components::read::drive_combo_box::DriveComboBox;
@@ -16,7 +16,7 @@ use crate::ui::messages::read_message::ReadMessage;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::widget::{column, row};
-use iced::{keyboard, Element, Subscription, Task};
+use iced::{event, keyboard, Element, Event, Subscription, Task};
 
 pub struct ReadPage {
     query_use_case: Arc<FileQueryService>,
@@ -111,8 +111,8 @@ impl ReadPage {
     }
 
     pub fn subscription() -> Subscription<ReadMessage> {
-        Subscription::batch([
-            keyboard::on_key_press(|key, modifiers| {
+        Subscription::batch([event::listen_with(|event, _status, _window| match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 let keyboard::Key::Named(key) = key else {
                     return None;
                 };
@@ -135,8 +135,8 @@ impl ReadPage {
                     (Named::End, _) => Some(ReadMessage::EndPressed),
                     _ => None,
                 }
-            }),
-            keyboard::on_key_release(|key, _| {
+            }
+            Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
                 let keyboard::Key::Named(key) = key else {
                     return None;
                 };
@@ -146,8 +146,9 @@ impl ReadPage {
                     }
                     _ => None,
                 }
-            }),
-        ])
+            }
+            _ => None,
+        })])
     }
 
     fn load_current_page(&mut self) -> Task<ReadMessage> {

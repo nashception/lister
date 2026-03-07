@@ -1,4 +1,4 @@
-use crate::domain::entities::language::Language;
+use crate::domain::model::language::Language;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::ui::messages::write_message::WriteMessage;
 use std::collections::HashMap;

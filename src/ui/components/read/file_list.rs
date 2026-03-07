@@ -1,21 +1,23 @@
-use crate::domain::entities::file_entry::FileWithMetadata;
-use crate::domain::entities::language::Language;
+use crate::domain::model::file_entry::FileWithMetadata;
+use crate::domain::model::language::Language;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::ui::utils::format_date_time::format_date_time;
 use humansize::{format_size, DECIMAL};
-use iced::widget::{column, row, scrollable, text, Rule};
+use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset};
+use iced::widget::{column, operation, row, rule, text, Scrollable};
+use iced::widget::Id;
 use iced::{Element, Length};
 
 pub struct FileList {
     pub files: Vec<FileWithMetadata>,
-    pub scroll_bar_id: scrollable::Id,
+    pub scroll_bar_id: Id,
 }
 
 impl FileList {
     pub fn new() -> Self {
         Self {
             files: Vec::new(),
-            scroll_bar_id: scrollable::Id::unique(),
+            scroll_bar_id: Id::unique(),
         }
     }
 
@@ -44,37 +46,34 @@ impl FileList {
                     text(format_size(file.size_bytes, DECIMAL))
                         .width(Length::FillPortion(1))
                 ]
-                .padding(3)
-                .into()
+                    .padding(3)
+                    .into()
             })
             .collect();
 
         column![
-            Rule::horizontal(1),
-            scrollable(column(file_rows))
+            rule::horizontal(1),
+            Scrollable::new(column(file_rows))
                 .id(self.scroll_bar_id.clone())
                 .height(Length::Fill),
-            Rule::horizontal(1),
+            rule::horizontal(1),
         ]
-        .into()
+            .into()
     }
 
     pub fn snap_to_top(&self) -> iced::Task<ReadMessage> {
-        scrollable::snap_to(
-            self.scroll_bar_id.clone(),
-            scrollable::RelativeOffset::START,
-        )
+        operation::snap_to(self.scroll_bar_id.clone(), RelativeOffset::START)
     }
 
     pub fn snap_to_bottom(&self) -> iced::Task<ReadMessage> {
-        scrollable::snap_to(self.scroll_bar_id.clone(), scrollable::RelativeOffset::END)
+        operation::snap_to(self.scroll_bar_id.clone(), RelativeOffset::END)
     }
 
     pub fn scroll(&self, dy: f32, shift: bool) -> iced::Task<ReadMessage> {
         let offset = if shift { dy * 33. } else { dy };
-        scrollable::scroll_by(
+        operation::scroll_by(
             self.scroll_bar_id.clone(),
-            scrollable::AbsoluteOffset { x: 0.0, y: offset },
+            AbsoluteOffset { x: 0.0, y: offset },
         )
     }
 }
