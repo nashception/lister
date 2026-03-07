@@ -7,9 +7,10 @@ use crate::ui::pages::write_page::WritePage;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;
+use iced::widget::operation::{focus_next, focus_previous};
 use iced::widget::{button, column, row, text, Space};
 use iced::window::{icon, Icon, Settings};
-use iced::{keyboard, widget, Alignment, Element, Length, Subscription, Task};
+use iced::{event, keyboard, Alignment, Element, Event, Length, Subscription, Task};
 use std::collections::HashMap;
 
 enum Page {
@@ -72,7 +73,7 @@ impl ListerApp {
             Page::Write(page) => page.view(&self.translations).map(AppMessage::Write),
         };
 
-        column![language_toggle, Space::with_height(10), nav_bar, content]
+        column![language_toggle, Space::new().height(10), nav_bar, content]
             .padding(20)
             .into()
     }
@@ -122,9 +123,9 @@ impl ListerApp {
             }
             AppMessage::TabPressed { shift } => {
                 if shift {
-                    widget::focus_previous()
+                    focus_previous()
                 } else {
-                    widget::focus_next()
+                    focus_next()
                 }
             }
             AppMessage::ChangePage => match self.current_page {
@@ -135,18 +136,23 @@ impl ListerApp {
     }
 
     pub fn subscription(&self) -> Subscription<AppMessage> {
-        let app_subscription = keyboard::on_key_press(|key, modifiers| {
-            let keyboard::Key::Named(key) = key else {
-                return None;
-            };
-            match (key, modifiers) {
-                (Named::Tab, Modifiers::CTRL) => Some(AppMessage::ChangePage),
-                (Named::Tab, _) => Some(AppMessage::TabPressed {
-                    shift: modifiers.shift(),
-                }),
-                _ => None,
+        let app_subscription = event::listen_with(|event, _status, _window| match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                let keyboard::Key::Named(key) = key else {
+                    return None;
+                };
+
+                match (key, modifiers) {
+                    (Named::Tab, Modifiers::CTRL) => Some(AppMessage::ChangePage),
+                    (Named::Tab, _) => Some(AppMessage::TabPressed {
+                        shift: modifiers.shift(),
+                    }),
+                    _ => None,
+                }
             }
+            _ => None,
         });
+
         let page_subscription = match &self.current_page {
             Page::Read(_) => ReadPage::subscription().map(AppMessage::Read),
             Page::Write(_) => Subscription::none(),
@@ -191,7 +197,7 @@ impl ListerApp {
         let toggle_button = button(text(label))
             .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()));
 
-        row![Space::with_width(Length::Fill), toggle_button]
+        row![Space::new().width(Length::Fill), toggle_button]
             .width(Length::Fill)
             .into()
     }

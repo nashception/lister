@@ -1,7 +1,7 @@
-use iced::widget::{button, column, focus_next, row, text, text_input};
+use iced::widget::{button, column, row, text, text_input};
 use iced::{Element, Length, Task};
 use std::collections::HashMap;
-
+use iced::widget::operation::focus_next;
 use crate::tr;
 use crate::ui::messages::read_message::ReadMessage;
 
