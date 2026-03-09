@@ -6,43 +6,38 @@ on:
       - "v*.*.*"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-and-release:
     strategy:
       matrix:
-        target:
-          - x86_64-pc-windows-gnu
-          - x86_64-unknown-linux-gnu
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: windows-2025-vs2026
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+          - os: macos-26
+            target: aarch64-apple-darwin
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Build binary with cross
-        run: cross build --release --target ${{ matrix.target }}
-
-      - name: Strip binary
-        run: |
-          if [ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]; then
-            strip target/${{ matrix.target }}/release/lister.exe
-          elif [ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]; then
-            strip target/${{ matrix.target }}/release/lister
-          fi
+      - name: Build
+        run: cargo build --release --locked
 
       - name: Rename binary
+        shell: bash
         run: |
-          if [ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]; then
-            mv target/${{ matrix.target }}/release/lister.exe target/${{ matrix.target }}/release/lister-${{ matrix.target }}.exe
-          elif [ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]; then
-            mv target/${{ matrix.target }}/release/lister target/${{ matrix.target }}/release/lister-${{ matrix.target }}
-          fi
+          mv target/release/lister${{ matrix.ext }} \
+             lister-${{ matrix.target }}${{ matrix.ext }}
 
-      - name: Upload binary to release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
-          files: target/${{ matrix.target }}/release/lister-${{ matrix.target }}*
+          files: lister-*
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}

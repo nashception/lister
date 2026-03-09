@@ -46,6 +46,7 @@ fn try_update() -> Result<String, UpdateError> {
         .bin_name("lister")
         .current_version(env!("CARGO_PKG_VERSION"))
         .no_confirm(true)
+        .show_output(false)
         .build()?
         .update()?;
 
