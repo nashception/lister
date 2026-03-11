@@ -182,18 +182,23 @@ impl ReadPage {
         Task::perform(
             async move {
                 let count = query_use_case
-                    .get_search_count(&selected_drive, &search_query)
+                    .get_search_count(selected_drive.as_deref(), search_query.as_deref())
                     .unwrap_or(0);
                 let files = if count <= CACHED_SIZE {
                     query_use_case
-                        .search_files(&selected_drive, &search_query, 0, count)
+                        .search_files(selected_drive.as_deref(), search_query.as_deref(), 0, count)
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
                         })
                 } else {
                     query_use_case
-                        .search_files(&selected_drive, &search_query, page as u64, ipp as u64)
+                        .search_files(
+                            selected_drive.as_deref(),
+                            search_query.as_deref(),
+                            page as u64,
+                            ipp as u64,
+                        )
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
@@ -332,7 +337,7 @@ impl ReadPage {
         Task::perform(
             async move {
                 let files = query_use_case
-                    .search_files(&selected_drive, &search_query, 0, total)
+                    .search_files(selected_drive.as_deref(), search_query.as_deref(), 0, total)
                     .unwrap_or_else(|error| {
                         popup_error(error);
                         vec![]

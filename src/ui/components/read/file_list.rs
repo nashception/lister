@@ -4,8 +4,8 @@ use crate::ui::messages::read_message::ReadMessage;
 use crate::ui::utils::format_date_time::format_date_time;
 use humansize::{format_size, DECIMAL};
 use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset};
-use iced::widget::{column, operation, row, rule, text, Scrollable};
 use iced::widget::Id;
+use iced::widget::{column, operation, row, rule, text, Scrollable};
 use iced::{Element, Length};
 
 pub struct FileList {
@@ -43,11 +43,10 @@ impl FileList {
                         .width(Length::FillPortion(2)),
                     text(file.parent_directory()).width(Length::FillPortion(3)),
                     text(file.filename()).width(Length::FillPortion(4)),
-                    text(format_size(file.size_bytes, DECIMAL))
-                        .width(Length::FillPortion(1))
+                    text(format_size(file.size_bytes, DECIMAL)).width(Length::FillPortion(1))
                 ]
-                    .padding(3)
-                    .into()
+                .padding(3)
+                .into()
             })
             .collect();
 
@@ -58,7 +57,7 @@ impl FileList {
                 .height(Length::Fill),
             rule::horizontal(1),
         ]
-            .into()
+        .into()
     }
 
     pub fn snap_to_top(&self) -> iced::Task<ReadMessage> {

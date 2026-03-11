@@ -1,18 +1,17 @@
 use crate::application::directory_scanner;
-use crate::domain::model::category::Category;
-use crate::domain::model::drive::{Drive, DriveToDelete};
-use crate::domain::model::file_entry::FileEntry;
 use crate::domain::errors::domain_error::DomainError;
+use crate::domain::model::file_entry::FileEntry;
 use crate::infrastructure::database::command_repository::CommandRepository;
 use std::path::Path;
+use std::sync::Arc;
 
 pub struct FileIndexingService {
-    command_repo: CommandRepository,
+    command_repo: Arc<CommandRepository>,
 }
 
 impl FileIndexingService {
     #[must_use]
-    pub const fn new(command_repo: CommandRepository) -> Self {
+    pub const fn new(command_repo: Arc<CommandRepository>) -> Self {
         Self { command_repo }
     }
 
@@ -25,9 +24,8 @@ impl FileIndexingService {
     ///
     /// Returns a [`DomainError`] if:
     /// - A [`Repository`](DomainError::Repository) error occurs while removing duplicates.
-    pub fn remove_duplicates(&self, category: String, drive: String) -> Result<(), DomainError> {
-        self.command_repo
-            .remove_duplicates(Category { name: category }, DriveToDelete { name: drive })?;
+    pub fn remove_duplicates(&self, category: &str, drive: &str) -> Result<(), DomainError> {
+        self.command_repo.remove_duplicates(category, drive)?;
         Ok(())
     }
 
@@ -55,19 +53,14 @@ impl FileIndexingService {
     /// - A [`Repository`](DomainError::Repository) error occurs during the insert operation.
     pub fn insert_in_database(
         &self,
-        category: String,
-        drive: String,
+        category: &str,
+        drive: &str,
         drive_available_space: u64,
-        files: Vec<FileEntry>,
+        files: &[FileEntry],
     ) -> Result<usize, DomainError> {
-        let files_count = self.command_repo.save(
-            Category { name: category },
-            Drive {
-                name: drive,
-                available_space: drive_available_space,
-            },
-            files,
-        )?;
+        let files_count = self
+            .command_repo
+            .save(category, drive, drive_available_space, files)?;
         Ok(files_count)
     }
 }

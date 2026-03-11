@@ -1,3 +1,4 @@
+use crate::application::delete_service::DeleteService;
 use crate::application::file_indexing_service::FileIndexingService;
 use crate::application::file_query_service::FileQueryService;
 use crate::application::language_service::LanguageService;
@@ -15,6 +16,7 @@ use std::sync::Arc;
 pub struct ListerAppService {
     pub query_use_case: Arc<FileQueryService>,
     pub indexing_use_case: Arc<FileIndexingService>,
+    pub delete_use_case: Arc<DeleteService>,
     pub language_use_case: Arc<LanguageService>,
     pub directory_picker: Arc<NativeDirectoryPicker>,
 }
@@ -28,11 +30,12 @@ impl ListerAppService {
             SqliteRepositoryPool::new("app.db").unwrap_or_else(|error| popup_error_and_exit(error));
 
         let query_repository = QueryRepository::new(Arc::clone(&pool));
-        let command_repository = CommandRepository::new(Arc::clone(&pool));
+        let command_repository = Arc::new(CommandRepository::new(Arc::clone(&pool)));
         let language_repository = LanguageRepository::new(pool);
 
         let query_service = Arc::new(FileQueryService::new(query_repository));
-        let indexing_service = Arc::new(FileIndexingService::new(command_repository));
+        let indexing_service = Arc::new(FileIndexingService::new(command_repository.clone()));
+        let delete_service = Arc::new(DeleteService::new(command_repository));
         let language_service = Arc::new(LanguageService::new(
             language_repository,
             JsonTranslationLoader,
@@ -41,6 +44,7 @@ impl ListerAppService {
         Self {
             query_use_case: query_service,
             indexing_use_case: indexing_service,
+            delete_use_case: delete_service,
             language_use_case: language_service,
             directory_picker,
         }

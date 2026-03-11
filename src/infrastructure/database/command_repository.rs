@@ -1,5 +1,3 @@
-use crate::domain::model::category::Category;
-use crate::domain::model::drive::{Drive, DriveToDelete};
 use crate::domain::model::file_entry::FileEntry;
 use crate::infrastructure::database::conversion::ToI64;
 use crate::infrastructure::database::entities::{
@@ -37,16 +35,20 @@ impl CommandRepository {
     /// Returns a [`RepositoryError`] if:
     /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
     /// - A [`Database`](RepositoryError::Database) error occurs during the delete operation.
-    pub fn remove_duplicates(
-        &self,
-        category: Category,
-        drive: DriveToDelete,
-    ) -> Result<(), RepositoryError> {
-        let category_name = category.name;
-        let drive_name = drive.name;
+    pub fn remove_duplicates(&self, category: &str, drive: &str) -> Result<(), RepositoryError> {
+        self.pool.execute_in_transaction(|conn| {
+            diesel::delete(
+                file_entries::table.filter(exists(
+                    drive_entries::table
+                        .inner_join(file_categories::table)
+                        .filter(drive_entries::id.eq(file_entries::drive_id))
+                        .filter(file_categories::name.eq(category))
+                        .filter(drive_entries::name.eq(drive)),
+                )),
+            )
+            .execute(conn)?;
 
-        self.pool.execute_in_transaction(move |conn| {
-            Self::do_remove_duplicates(category_name, drive_name, conn)
+            Ok(())
         })
     }
 
@@ -62,44 +64,60 @@ impl CommandRepository {
     /// - A [`Database`](RepositoryError::Database) error occurs during insert operations.
     pub fn save(
         &self,
-        category: Category,
-        drive: Drive,
-        files: Vec<FileEntry>,
+        category: &str,
+        drive: &str,
+        drive_available_space: u64,
+        files: &[FileEntry],
     ) -> Result<usize, RepositoryError> {
-        let category_name = category.name;
-
-        self.pool.execute_in_transaction(move |conn| {
-            let category_id = Self::save_category(category_name, conn)?;
-            let drive_id = Self::save_drive(drive, category_id, conn)?;
-            Self::save_files(files, drive_id, conn)
+        self.pool.execute_in_transaction(|conn| {
+            let category_id = Self::save_category(category, conn)?;
+            let drive_id = Self::save_drive(drive, drive_available_space, &category_id, conn)?;
+            Self::save_files(files, &drive_id, conn)
         })
     }
 
-    fn do_remove_duplicates(
-        category_name: String,
-        drive_name: String,
-        conn: &mut SqliteConnection,
-    ) -> Result<(), RepositoryError> {
-        diesel::delete(
-            file_entries::table.filter(exists(
-                drive_entries::table
-                    .inner_join(file_categories::table)
-                    .filter(drive_entries::id.eq(file_entries::drive_id))
-                    .filter(file_categories::name.eq(category_name))
-                    .filter(drive_entries::name.eq(drive_name)),
-            )),
-        )
-        .execute(conn)?;
+    /// Deletes a drive, optionally filtered by category, from the database.
+    ///
+    /// If a category is provided, only the drive entries associated with that
+    /// category will be removed. If no category is specified, all entries for
+    /// the given drive will be deleted.
+    ///
+    /// # Parameters
+    ///
+    /// - `drive`: The name or identifier of the drive to delete.
+    /// - `category`: An optional category name; if provided, deletion is limited
+    ///   to drives under this category.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during the delete operation.
+    pub fn delete(&self, drive: &str, category: Option<&str>) -> Result<(), RepositoryError> {
+        self.pool.execute_in_transaction(|conn| {
+            if let Some(category_name) = category {
+                let cat_ids = file_categories::table
+                    .select(file_categories::id)
+                    .filter(file_categories::name.eq(category_name));
 
-        Ok(())
+                diesel::delete(
+                    drive_entries::table
+                        .filter(drive_entries::name.eq(drive))
+                        .filter(drive_entries::category_id.eq_any(cat_ids)),
+                )
+                .execute(conn)?;
+            } else {
+                diesel::delete(drive_entries::table.filter(drive_entries::name.eq(drive)))
+                    .execute(conn)?;
+            }
+
+            Ok(())
+        })
     }
 
-    fn save_category(
-        category_name: String,
-        conn: &mut SqliteConnection,
-    ) -> Result<Uuid, RepositoryError> {
+    fn save_category(category: &str, conn: &mut SqliteConnection) -> Result<Uuid, RepositoryError> {
         if let Ok(existing_id) = file_categories::table
-            .filter(file_categories::name.eq(&category_name))
+            .filter(file_categories::name.eq(category))
             .select(file_categories::id)
             .first::<String>(conn)
         {
@@ -109,7 +127,7 @@ impl CommandRepository {
         let category_id: String = diesel::insert_into(file_categories::table)
             .values(NewFileCategoryDto {
                 id: Uuid::new_v4().to_string(),
-                name: category_name,
+                name: category.to_string(),
             })
             .returning(file_categories::id)
             .get_result(conn)?;
@@ -117,15 +135,16 @@ impl CommandRepository {
     }
 
     fn save_drive(
-        drive: Drive,
-        category_id: Uuid,
+        drive: &str,
+        drive_available_space: u64,
+        category_id: &Uuid,
         conn: &mut SqliteConnection,
     ) -> Result<Uuid, RepositoryError> {
         let category_id_string = category_id.to_string();
         if let Ok(existing_id) = drive_entries::table
             .filter(
                 drive_entries::name
-                    .eq(&drive.name)
+                    .eq(drive)
                     .and(drive_entries::category_id.eq(&category_id_string)),
             )
             .select(drive_entries::id)
@@ -138,41 +157,37 @@ impl CommandRepository {
             .values(NewDriveEntryDto {
                 id: Uuid::new_v4().to_string(),
                 category_id: category_id_string,
-                name: drive.name.clone(),
-                available_space: drive.available_space.to_i64_or_zero(),
+                name: drive.to_string(),
+                available_space: drive_available_space.to_i64_or_zero(),
                 insertion_time: Local::now().naive_local(),
             })
             .returning(drive_entries::id)
             .get_result(conn)?;
 
-        Self::update_same_drives_available_space(drive, conn)?;
+        Self::update_same_drives_available_space(drive, drive_available_space, conn)?;
 
         Ok(Uuid::parse_str(&drive_id).unwrap())
     }
 
     fn update_same_drives_available_space(
-        drive: Drive,
+        drive: &str,
+        drive_available_space: u64,
         conn: &mut SqliteConnection,
     ) -> Result<(), RepositoryError> {
-        update(drive_entries::table.filter(drive_entries::name.eq(drive.name)))
-            .set(drive_entries::available_space.eq(drive.available_space.to_i64_or_zero()))
+        update(drive_entries::table.filter(drive_entries::name.eq(drive)))
+            .set(drive_entries::available_space.eq(drive_available_space.to_i64_or_zero()))
             .execute(conn)?;
         Ok(())
     }
 
     fn save_files(
-        files: Vec<FileEntry>,
-        drive_id: Uuid,
+        files: &[FileEntry],
+        drive_id: &Uuid,
         conn: &mut SqliteConnection,
     ) -> Result<usize, RepositoryError> {
         let dto_files: Vec<NewFileEntryDto> = files
-            .into_par_iter()
-            .map(|f| NewFileEntryDto {
-                id: Uuid::new_v4().to_string(),
-                drive_id: drive_id.to_string(),
-                path: f.path,
-                weight: f.size_bytes.to_i64_or_zero(),
-            })
+            .par_iter()
+            .map(|file_entry| (file_entry, drive_id).into())
             .collect();
 
         let insert_count = diesel::insert_into(file_entries::table)

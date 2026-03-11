@@ -152,9 +152,9 @@ impl WritePage {
 
         let directory_display = self.write_data.directory.as_ref()
             .map_or_else(|| text(tr!(translations, "no_directory_selected")).style(text::secondary), |dir|
-            text(tr!(translations, "selected_directory", "dir" => &dir.display().to_string()))
-                .style(text::success))
-        .width(Length::Fill);
+                text(tr!(translations, "selected_directory", "dir" => &dir.display().to_string()))
+                    .style(text::success))
+            .width(Length::Fill);
 
         let browse_button = button(text(tr!(translations, "browse_directory")))
             .on_press(WriteMessage::DirectoryPressed {
@@ -289,7 +289,7 @@ impl WritePage {
         Task::perform(
             async move {
                 indexing_use_case
-                    .remove_duplicates(category, drive)
+                    .remove_duplicates(&category, &drive)
                     .unwrap_or_else(|error| popup_error_and_exit(error));
             },
             |()| WriteMessage::DatabaseCleaned,
@@ -335,7 +335,7 @@ impl WritePage {
         Task::perform(
             async move {
                 indexing_use_case
-                    .insert_in_database(category, drive, drive_available_space, files)
+                    .insert_in_database(&category, &drive, drive_available_space, &files)
                     .unwrap_or(0)
             },
             WriteMessage::InsertInDatabaseFinished,
