@@ -30,6 +30,14 @@ impl NativeDirectoryPicker {
             })
         }
 
+        #[cfg(target_os = "macos")]
+        {
+            rfd::FileDialog::new()
+                .set_title(title)
+                .pick_folder()
+                .map(|handle| directory_data(handle.as_path()))
+        }
+
         #[cfg(target_os = "windows")]
         {
             rfd::FileDialog::new()
