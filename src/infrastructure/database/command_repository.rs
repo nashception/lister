@@ -111,6 +111,11 @@ impl CommandRepository {
                     .execute(conn)?;
             }
 
+            diesel::delete(file_categories::table.filter(
+                file_categories::id.ne_all(drive_entries::table.select(drive_entries::category_id)),
+            ))
+            .execute(conn)?;
+
             Ok(())
         })
     }

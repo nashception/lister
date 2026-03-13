@@ -627,7 +627,7 @@ fn test_edge_cases_and_error_handling() {
         "Empty",
         "Drive",
         0,
-        &vec![],
+        &[],
     );
     assert!(empty_index.is_ok());
     assert_eq!(empty_index.unwrap(), 0);
@@ -777,4 +777,124 @@ fn test_delete_nonexistent_drive_or_category() {
         .delete_service
         .delete("Laptop", Some("NonexistentCategory"))
         .unwrap();
+}
+
+#[test]
+fn test_delete_entire_drive_removes_stale_categories() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+
+    // Insert files in two categories
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Laptop", 1024, &files)
+        .unwrap();
+    fixture
+        .indexing_service
+        .insert_in_database("Personal", "Laptop", 1024, &files)
+        .unwrap();
+
+    // Make sure categories exist
+    let categories_before: Vec<String> = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(categories_before.contains(&"Work".to_string()));
+    assert!(categories_before.contains(&"Personal".to_string()));
+
+    // Delete the entire drive
+    fixture.delete_service.delete("Laptop", None).unwrap();
+
+    // Drive files should be gone
+    let result = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(result.is_empty());
+
+    // Stale categories should be removed
+    let categories_after: Vec<String> = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(!categories_after.contains(&"Work".to_string()));
+    assert!(!categories_after.contains(&"Personal".to_string()));
+}
+
+#[test]
+fn test_delete_specific_category_removes_stale_category() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+
+    // Insert files in two categories
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Laptop", 1024, &files)
+        .unwrap();
+    fixture
+        .indexing_service
+        .insert_in_database("Personal", "Laptop", 1024, &files)
+        .unwrap();
+
+    // Delete a specific category
+    fixture
+        .delete_service
+        .delete("Laptop", Some("Work"))
+        .unwrap();
+
+    // Work files should be gone, Personal files remain
+    let remaining_files = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(remaining_files.iter().all(|f| f.category_name != "Work"));
+    assert!(remaining_files.iter().any(|f| f.category_name == "Personal"));
+
+    // Stale category 'Work' should be removed
+    let categories_after: Vec<String> = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(!categories_after.contains(&"Work".to_string()));
+    assert!(categories_after.contains(&"Personal".to_string()));
+}
+
+#[test]
+fn test_category_not_deleted_if_used_by_another_drive() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+
+    // Index the same category "Work" on two drives
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Laptop", 1024, &files)
+        .unwrap();
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Desktop", 2048, &files)
+        .unwrap();
+
+    // Delete all files on Laptop
+    fixture.delete_service.delete("Laptop", None).unwrap();
+
+    // Verify Laptop has no files
+    let laptop_files = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(laptop_files.is_empty());
+
+    // Verify category "Work" still exists because Desktop uses it
+    let desktop_categories = fixture
+        .query_service
+        .list_category_names_for_drive("Desktop")
+        .unwrap();
+    assert!(desktop_categories.contains(&"Work".to_string()));
+
+    // Verify "Work" is not listed as stale globally
+    let laptop_categories = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(!laptop_categories.contains(&"Work".to_string()));
 }
