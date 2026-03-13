@@ -7,11 +7,12 @@ use crate::domain::model::file_entry::FileWithMetadata;
 use crate::domain::model::language::Language;
 use crate::domain::model::pagination::PaginatedResult;
 use crate::tr;
+use crate::ui::components::drive_combo_box::DriveComboBox;
 use crate::ui::components::read::cache::Cache;
-use crate::ui::components::read::drive_combo_box::DriveComboBox;
 use crate::ui::components::read::file_list::FileList;
 use crate::ui::components::read::pagination::Pagination;
 use crate::ui::components::read::search::Search;
+use crate::ui::messages::drive_combo_box::DriveComboBoxMessage;
 use crate::ui::messages::read_message::ReadMessage;
 use crate::utils::dialogs::popup_error;
 use iced::keyboard::key::Named;
@@ -41,7 +42,10 @@ impl ReadPage {
             cache: Cache::new(),
             is_cache_warming: false,
         };
-        (page, Task::batch([combo_box_task, search_task]))
+        (
+            page,
+            Task::batch([combo_box_task.map(ReadMessage::DriveComboBox), search_task]),
+        )
     }
 
     pub fn title(translations: &HashMap<String, String>) -> String {
@@ -53,7 +57,10 @@ impl ReadPage {
         translations: &HashMap<String, String>,
         language: &Language,
     ) -> Element<'_, ReadMessage> {
-        let drive_combo_box = self.drive_combo_box.view(translations);
+        let drive_combo_box = self
+            .drive_combo_box
+            .view(translations)
+            .map(ReadMessage::DriveComboBox);
         let search_section = self.search.view(translations);
         let files = self.file_list.view(language);
         let pagination_section = self.pagination.view(translations);
@@ -70,43 +77,45 @@ impl ReadPage {
 
     pub fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
         match message {
-            ReadMessage::PrevPage => self.previous_page(),
-            ReadMessage::NextPage => self.next_page(),
-            ReadMessage::FirstPage => self.navigate_to_page(0),
-            ReadMessage::LastPage => {
-                self.navigate_to_page(self.pagination.total_pages().saturating_sub(1))
-            }
-            ReadMessage::DrivesFetched(drives) => {
-                self.drive_combo_box.drives = drives;
-                Task::none()
-            }
-            ReadMessage::DriveSelected(drive) => {
-                self.drive_combo_box.selected_drive = Some(drive);
-                self.process_new_search()
-            }
-            ReadMessage::SearchSubmit => self.process_new_search(),
-            ReadMessage::SearchClear => self.clear_search(),
+            ReadMessage::ArrowDownPressed { shift } => self.file_list.scroll(30., shift),
+            ReadMessage::ArrowLeftPressed { shift } => self.handle_left(shift),
+            ReadMessage::ArrowNavigationReleased => self.load_current_page(),
+            ReadMessage::ArrowRightPressed { shift } => self.handle_right(shift),
+            ReadMessage::ArrowUpPressed { shift } => self.file_list.scroll(-30., shift),
             ReadMessage::ContentChanged(content) => {
                 self.search.query = content;
                 Task::none()
+            }
+            ReadMessage::DriveComboBox(msg) => match msg {
+                DriveComboBoxMessage::DrivesFetched(drives) => {
+                    self.drive_combo_box.drives = drives;
+                    Task::none()
+                }
+                DriveComboBoxMessage::DriveSelected(drive) => {
+                    self.drive_combo_box.selected_drive = Some(drive);
+                    self.process_new_search()
+                }
+            },
+            ReadMessage::EndPressed => self.file_list.snap_to_bottom(),
+            ReadMessage::FilesLoaded(result) => self.handle_files_loaded(result),
+            ReadMessage::FirstPage => self.navigate_to_page(0),
+            ReadMessage::HomePressed => self.file_list.snap_to_top(),
+            ReadMessage::LastPage => {
+                self.navigate_to_page(self.pagination.total_pages().saturating_sub(1))
+            }
+            ReadMessage::NextPage => self.next_page(),
+            ReadMessage::PageDownPressed => {
+                self.update(ReadMessage::ArrowDownPressed { shift: true })
             }
             ReadMessage::PageInputChanged(page_number) => {
                 self.pagination.page_input_value = page_number;
                 Task::none()
             }
             ReadMessage::PageInputSubmit => self.process_page_input(),
-            ReadMessage::FilesLoaded(result) => self.handle_files_loaded(result),
-            ReadMessage::ArrowLeftPressed { shift } => self.handle_left(shift),
-            ReadMessage::ArrowRightPressed { shift } => self.handle_right(shift),
-            ReadMessage::ArrowUpPressed { shift } => self.file_list.scroll(-30., shift),
-            ReadMessage::ArrowDownPressed { shift } => self.file_list.scroll(30., shift),
-            ReadMessage::ArrowNavigationReleased => self.load_current_page(),
             ReadMessage::PageUpPressed => self.update(ReadMessage::ArrowUpPressed { shift: true }),
-            ReadMessage::PageDownPressed => {
-                self.update(ReadMessage::ArrowDownPressed { shift: true })
-            }
-            ReadMessage::HomePressed => self.file_list.snap_to_top(),
-            ReadMessage::EndPressed => self.file_list.snap_to_bottom(),
+            ReadMessage::PrevPage => self.previous_page(),
+            ReadMessage::SearchClear => self.clear_search(),
+            ReadMessage::SearchSubmit => self.process_new_search(),
         }
     }
 
@@ -182,18 +191,23 @@ impl ReadPage {
         Task::perform(
             async move {
                 let count = query_use_case
-                    .get_search_count(&selected_drive, &search_query)
+                    .get_search_count(selected_drive.as_deref(), search_query.as_deref())
                     .unwrap_or(0);
                 let files = if count <= CACHED_SIZE {
                     query_use_case
-                        .search_files(&selected_drive, &search_query, 0, count)
+                        .search_files(selected_drive.as_deref(), search_query.as_deref(), 0, count)
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
                         })
                 } else {
                     query_use_case
-                        .search_files(&selected_drive, &search_query, page as u64, ipp as u64)
+                        .search_files(
+                            selected_drive.as_deref(),
+                            search_query.as_deref(),
+                            page as u64,
+                            ipp as u64,
+                        )
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
@@ -332,7 +346,7 @@ impl ReadPage {
         Task::perform(
             async move {
                 let files = query_use_case
-                    .search_files(&selected_drive, &search_query, 0, total)
+                    .search_files(selected_drive.as_deref(), search_query.as_deref(), 0, total)
                     .unwrap_or_else(|error| {
                         popup_error(error);
                         vec![]

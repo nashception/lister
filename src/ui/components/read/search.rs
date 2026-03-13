@@ -1,9 +1,9 @@
+use crate::tr;
+use crate::ui::messages::read_message::ReadMessage;
+use iced::widget::operation::focus_next;
 use iced::widget::{button, column, row, text, text_input};
 use iced::{Element, Length, Task};
 use std::collections::HashMap;
-use iced::widget::operation::focus_next;
-use crate::tr;
-use crate::ui::messages::read_message::ReadMessage;
 
 pub struct Search {
     pub query: String,

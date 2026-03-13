@@ -1,5 +1,5 @@
-use crate::domain::model::file_entry::FileWithMetadata;
 use crate::domain::errors::domain_error::DomainError;
+use crate::domain::model::file_entry::FileWithMetadata;
 use crate::infrastructure::database::query_repository::QueryRepository;
 
 pub struct FileQueryService {
@@ -35,8 +35,8 @@ impl FileQueryService {
     /// - A [`Repository`](DomainError::Repository) error occurs while executing the count query.
     pub fn get_search_count(
         &self,
-        selected_drive: &Option<String>,
-        query: &Option<String>,
+        selected_drive: Option<&str>,
+        query: Option<&str>,
     ) -> Result<u64, DomainError> {
         let count = self
             .query_repo
@@ -55,8 +55,8 @@ impl FileQueryService {
     /// - A [`Repository`](DomainError::Repository) error occurs while executing the search query.
     pub fn search_files(
         &self,
-        selected_drive: &Option<String>,
-        query: &Option<String>,
+        selected_drive: Option<&str>,
+        query: Option<&str>,
         page: u64,
         page_size: u64,
     ) -> Result<Vec<FileWithMetadata>, DomainError> {
@@ -66,5 +66,18 @@ impl FileQueryService {
         self.query_repo
             .search_files_paginated(selected_drive, query, offset, limit)
             .map_err(DomainError::from)
+    }
+
+    /// Retrieves all used category names based on a drive name.
+    ///
+    /// Returns a list of distinct category names accessible in the system.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DomainError`] if:
+    /// - A [`Repository`](DomainError::Repository) error occurs while fetching drive names from storage.
+    pub fn list_category_names_for_drive(&self, drive: &str) -> Result<Vec<String>, DomainError> {
+        let drives = self.query_repo.find_all_category_names_for_drive(drive)?;
+        Ok(drives)
     }
 }

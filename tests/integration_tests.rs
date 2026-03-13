@@ -1,4 +1,5 @@
 use chrono::Local;
+use lister::application::delete_service::DeleteService;
 use lister::application::file_indexing_service::FileIndexingService;
 use lister::application::file_query_service::FileQueryService;
 use lister::application::language_service::LanguageService;
@@ -20,6 +21,7 @@ struct TestFixture {
     _temp_dir: TempDir, // Store it to prevent its disposal
     query_service: Arc<FileQueryService>,
     indexing_service: Arc<FileIndexingService>,
+    delete_service: Arc<DeleteService>,
     language_service: Arc<LanguageService>,
 }
 
@@ -33,11 +35,12 @@ impl TestFixture {
             SqliteRepositoryPool::new(&db_url).unwrap_or_else(|error| popup_error_and_exit(error));
 
         let query_repository = QueryRepository::new(Arc::clone(&pool));
-        let command_repository = CommandRepository::new(Arc::clone(&pool));
+        let command_repository = Arc::new(CommandRepository::new(Arc::clone(&pool)));
         let language_repository = LanguageRepository::new(pool);
 
         let query_service = Arc::new(FileQueryService::new(query_repository));
-        let indexing_service = Arc::new(FileIndexingService::new(command_repository));
+        let indexing_service = Arc::new(FileIndexingService::new(command_repository.clone()));
+        let delete_service = Arc::new(DeleteService::new(command_repository));
         let language_service = Arc::new(LanguageService::new(
             language_repository,
             JsonTranslationLoader,
@@ -46,6 +49,7 @@ impl TestFixture {
         Self {
             _temp_dir: temp_dir,
             query_service,
+            delete_service,
             indexing_service,
             language_service,
         }
@@ -80,17 +84,17 @@ fn test_complete_file_indexing_workflow() {
 
     // Test indexing workflow
     let result = fixture.indexing_service.insert_in_database(
-        "Work".to_string(),
-        "Laptop".to_string(),
+        "Work",
+        "Laptop",
         1024,
-        files.clone(),
+        &files,
     );
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 4);
 
     // Verify files were indexed
-    let query_result = fixture.query_service.search_files(&None, &None, 0, 10);
+    let query_result = fixture.query_service.search_files(None, None, 0, 10);
     assert!(query_result.is_ok());
 
     let actual = query_result.unwrap();
@@ -114,35 +118,35 @@ fn test_duplicate_removal_workflow() {
     fixture
         .indexing_service
         .insert_in_database(
-            "Work".to_string(),
-            "Laptop".to_string(),
+            "Work",
+            "Laptop",
             1024,
-            files.clone(),
+            &files,
         )
         .expect("First indexing failed");
 
     // Remove duplicates
     let remove_result = fixture
         .indexing_service
-        .remove_duplicates("Work".to_string(), "Laptop".to_string());
+        .remove_duplicates("Work", "Laptop");
     assert!(remove_result.is_ok());
 
     // Verify files were removed
     let query_result = fixture
         .query_service
-        .search_files(&None, &None, 0, 10)
+        .search_files(None, None, 0, 10)
         .unwrap();
     assert_eq!(query_result.len(), 0);
 
     // Index again after removal
     fixture
         .indexing_service
-        .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
+        .insert_in_database("Work", "Laptop", 1024, &files)
         .expect("Second indexing failed");
 
     let final_result = fixture
         .query_service
-        .search_files(&None, &None, 0, 10)
+        .search_files(None, None, 0, 10)
         .unwrap();
     assert_eq!(final_result.len(), 4);
 }
@@ -155,13 +159,13 @@ fn test_file_search_functionality() {
     // Index test files
     fixture
         .indexing_service
-        .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
+        .insert_in_database("Work", "Laptop", 1024, &files)
         .expect("Indexing failed");
 
     // Test search by extension
     let pdf_results = fixture
         .query_service
-        .search_files(&None, &Some(String::from(".pdf")), 0, 10)
+        .search_files(None, Some(".pdf"), 0, 10)
         .unwrap();
     assert_eq!(pdf_results.len(), 2);
     assert!(pdf_results.iter().all(|f| f.path.contains(".pdf")));
@@ -169,7 +173,7 @@ fn test_file_search_functionality() {
     // Test search by directory
     let doc_results = fixture
         .query_service
-        .search_files(&None, &Some(String::from("documents")), 0, 10)
+        .search_files(None, Some("documents"), 0, 10)
         .unwrap();
     assert_eq!(doc_results.len(), 2);
     assert!(doc_results.iter().all(|f| f.path.contains("documents")));
@@ -177,7 +181,7 @@ fn test_file_search_functionality() {
     // Test search by filename
     let main_results = fixture
         .query_service
-        .search_files(&None, &Some(String::from("main")), 0, 10)
+        .search_files(None, Some("main"), 0, 10)
         .unwrap();
     assert_eq!(main_results.len(), 1);
     assert_eq!(main_results[0].path, "code/main.rs");
@@ -185,7 +189,7 @@ fn test_file_search_functionality() {
     // Test empty search returns all files
     let all_results = fixture
         .query_service
-        .search_files(&None, &Some(String::new()), 0, 10)
+        .search_files(None, Some(""), 0, 10)
         .unwrap();
     assert_eq!(all_results.len(), 4);
 }
@@ -199,46 +203,46 @@ fn test_selected_drive_basic_functionality() {
     fixture
         .indexing_service
         .insert_in_database(
-            "Work".to_string(),
-            "Laptop".to_string(),
+            "Work",
+            "Laptop",
             1024,
-            files.clone(),
+            &files,
         )
         .expect("Laptop indexing failed");
 
     fixture
         .indexing_service
         .insert_in_database(
-            "Work".to_string(),
-            "Desktop".to_string(),
+            "Work",
+            "Desktop",
             2048,
-            files.clone(),
+            &files,
         )
         .expect("Desktop indexing failed");
 
     fixture
         .indexing_service
-        .insert_in_database("Work".to_string(), "Server".to_string(), 4096, files)
+        .insert_in_database("Work", "Server", 4096, &files)
         .expect("Server indexing failed");
 
     // Test selecting specific drive
     let laptop_results = fixture
         .query_service
-        .search_files(&Some("Laptop".to_string()), &None, 0, 20)
+        .search_files(Some("Laptop"), None, 0, 20)
         .unwrap();
     assert_eq!(laptop_results.len(), 4);
     assert!(laptop_results.iter().all(|f| f.drive_name == "Laptop"));
 
     let desktop_results = fixture
         .query_service
-        .search_files(&Some("Desktop".to_string()), &None, 0, 20)
+        .search_files(Some("Desktop"), None, 0, 20)
         .unwrap();
     assert_eq!(desktop_results.len(), 4);
     assert!(desktop_results.iter().all(|f| f.drive_name == "Desktop"));
 
     let server_results = fixture
         .query_service
-        .search_files(&Some("Server".to_string()), &None, 0, 20)
+        .search_files(Some("Server"), None, 0, 20)
         .unwrap();
     assert_eq!(server_results.len(), 4);
     assert!(server_results.iter().all(|f| f.drive_name == "Server"));
@@ -246,7 +250,7 @@ fn test_selected_drive_basic_functionality() {
     // Test no drive selection (should return all)
     let all_results = fixture
         .query_service
-        .search_files(&None, &None, 0, 20)
+        .search_files(None, None, 0, 20)
         .unwrap();
     assert_eq!(all_results.len(), 12); // 4 files × 3 drives
 }
@@ -260,27 +264,22 @@ fn test_selected_drive_with_search_query() {
     fixture
         .indexing_service
         .insert_in_database(
-            "Work".to_string(),
-            "Laptop".to_string(),
+            "Work",
+            "Laptop",
             1024,
-            files.clone(),
+            &files,
         )
         .expect("Laptop indexing failed");
 
     fixture
         .indexing_service
-        .insert_in_database("Work".to_string(), "Desktop".to_string(), 2048, files)
+        .insert_in_database("Work", "Desktop", 2048, &files)
         .expect("Desktop indexing failed");
 
     // Test combining drive selection with search query
     let laptop_pdf_results = fixture
         .query_service
-        .search_files(
-            &Some("Laptop".to_string()),
-            &Some(".pdf".to_string()),
-            0,
-            10,
-        )
+        .search_files(Some("Laptop"), Some(".pdf"), 0, 10)
         .unwrap();
     assert_eq!(laptop_pdf_results.len(), 2);
     assert!(
@@ -291,12 +290,7 @@ fn test_selected_drive_with_search_query() {
 
     let desktop_pdf_results = fixture
         .query_service
-        .search_files(
-            &Some("Desktop".to_string()),
-            &Some(".pdf".to_string()),
-            0,
-            10,
-        )
+        .search_files(Some("Desktop"), Some(".pdf"), 0, 10)
         .unwrap();
     assert_eq!(desktop_pdf_results.len(), 2);
     assert!(
@@ -308,19 +302,14 @@ fn test_selected_drive_with_search_query() {
     // Test search query without drive selection (should find PDFs on both drives)
     let all_pdf_results = fixture
         .query_service
-        .search_files(&None, &Some(".pdf".to_string()), 0, 10)
+        .search_files(None, Some(".pdf"), 0, 10)
         .unwrap();
     assert_eq!(all_pdf_results.len(), 4); // 2 PDFs × 2 drives
 
     // Test drive selection with search query that has no matches
     let laptop_nonexistent_results = fixture
         .query_service
-        .search_files(
-            &Some("Laptop".to_string()),
-            &Some("nonexistent".to_string()),
-            0,
-            10,
-        )
+        .search_files(Some("Laptop"), Some("nonexistent"), 0, 10)
         .unwrap();
     assert_eq!(laptop_nonexistent_results.len(), 0);
 }
@@ -333,13 +322,13 @@ fn test_selected_drive_nonexistent_drive() {
     // Index files on one drive
     fixture
         .indexing_service
-        .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
+        .insert_in_database("Work", "Laptop", 1024, &files)
         .expect("Indexing failed");
 
     // Test selecting a nonexistent drive
     let nonexistent_results = fixture
         .query_service
-        .search_files(&Some("NonexistentDrive".to_string()), &None, 0, 10)
+        .search_files(Some("NonexistentDrive"), None, 0, 10)
         .unwrap();
     assert_eq!(nonexistent_results.len(), 0);
     assert_eq!(nonexistent_results.len(), 0);
@@ -347,12 +336,7 @@ fn test_selected_drive_nonexistent_drive() {
     // Test selecting a nonexistent drive with search query
     let nonexistent_with_query = fixture
         .query_service
-        .search_files(
-            &Some("NonexistentDrive".to_string()),
-            &Some(".pdf".to_string()),
-            0,
-            10,
-        )
+        .search_files(Some("NonexistentDrive"), Some(".pdf"), 0, 10)
         .unwrap();
     assert_eq!(nonexistent_with_query.len(), 0);
     assert_eq!(nonexistent_with_query.len(), 0);
@@ -375,28 +359,28 @@ fn test_selected_drive_with_pagination() {
     fixture
         .indexing_service
         .insert_in_database(
-            "Test".to_string(),
-            "Drive1".to_string(),
+            "Test",
+            "Drive1",
             1024,
-            many_files.clone(),
+            &many_files,
         )
         .expect("Drive1 indexing failed");
 
     fixture
         .indexing_service
-        .insert_in_database("Test".to_string(), "Drive2".to_string(), 2048, many_files)
+        .insert_in_database("Test", "Drive2", 2048, &many_files)
         .expect("Drive2 indexing failed");
 
     // Test pagination with drive selection
     let drive1_page0 = fixture
         .query_service
-        .search_files(&Some("Drive1".to_string()), &None, 0, 100)
+        .search_files(Some("Drive1"), None, 0, 100)
         .unwrap();
     assert_eq!(drive1_page0.len(), 100);
 
     let count = fixture
         .query_service
-        .get_search_count(&Some("Drive1".to_string()), &None)
+        .get_search_count(Some("Drive1"), None)
         .unwrap();
 
     assert_eq!(count, 150);
@@ -404,13 +388,13 @@ fn test_selected_drive_with_pagination() {
 
     let drive1_page1 = fixture
         .query_service
-        .search_files(&Some("Drive1".to_string()), &None, 1, 100)
+        .search_files(Some("Drive1"), None, 1, 100)
         .unwrap();
     assert_eq!(drive1_page1.len(), 50);
 
     let count = fixture
         .query_service
-        .get_search_count(&Some("Drive1".to_string()), &None)
+        .get_search_count(Some("Drive1"), None)
         .unwrap();
 
     assert_eq!(count, 150);
@@ -419,26 +403,26 @@ fn test_selected_drive_with_pagination() {
     // Test pagination without drive selection (should see all files)
     let all_page0 = fixture
         .query_service
-        .search_files(&None, &None, 0, 100)
+        .search_files(None, None, 0, 100)
         .unwrap();
     assert_eq!(all_page0.len(), 100);
 
     let count = fixture
         .query_service
-        .get_search_count(&None, &None)
+        .get_search_count(None, None)
         .unwrap();
 
     assert_eq!(count, 300); // 150 files × 2 drives
 
     let all_page2 = fixture
         .query_service
-        .search_files(&None, &None, 2, 100)
+        .search_files(None, None, 2, 100)
         .unwrap();
     assert_eq!(all_page2.len(), 100);
 
     let count = fixture
         .query_service
-        .get_search_count(&None, &None)
+        .get_search_count(None, None)
         .unwrap();
 
     assert_eq!(count, 300);
@@ -459,40 +443,40 @@ fn test_pagination_behavior() {
 
     fixture
         .indexing_service
-        .insert_in_database("Test".to_string(), "Drive".to_string(), 2048, many_files)
+        .insert_in_database("Test", "Drive", 2048, &many_files)
         .expect("Indexing failed");
 
     // Test first page
     let page_0 = fixture
         .query_service
-        .search_files(&None, &None, 0, 100)
+        .search_files(None, None, 0, 100)
         .unwrap();
     assert_eq!(page_0.len(), 100);
 
     // Test second page
     let page_1 = fixture
         .query_service
-        .search_files(&None, &None, 1, 100)
+        .search_files(None, None, 1, 100)
         .unwrap();
     assert_eq!(page_1.len(), 100);
 
     // Test last page
     let page_2 = fixture
         .query_service
-        .search_files(&None, &None, 2, 100)
+        .search_files(None, None, 2, 100)
         .unwrap();
     assert_eq!(page_2.len(), 50);
 
     // Test beyond last page
     let page_3 = fixture
         .query_service
-        .search_files(&None, &None, 3, 100)
+        .search_files(None, None, 3, 100)
         .unwrap();
     assert_eq!(page_3.len(), 0);
 
     let count = fixture
         .query_service
-        .get_search_count(&None, &None)
+        .get_search_count(None, None)
         .unwrap();
 
     assert_eq!(
@@ -508,14 +492,14 @@ fn test_search_result_count_accuracy() {
 
     fixture
         .indexing_service
-        .insert_in_database("Work".to_string(), "Laptop".to_string(), 1024, files)
+        .insert_in_database("Work", "Laptop", 1024, &files)
         .expect("Indexing failed");
 
     // Test that search results len() is accurate
     let search_query = ".pdf";
     let search_results = fixture
         .query_service
-        .search_files(&None, &Some(String::from(search_query)), 0, 100)
+        .search_files(None, Some(search_query), 0, 100)
         .unwrap();
 
     // Should find exactly 2 PDF files
@@ -565,32 +549,32 @@ fn test_multiple_categories_and_drives() {
     fixture
         .indexing_service
         .insert_in_database(
-            "Work".to_string(),
-            "Laptop".to_string(),
+            "Work",
+            "Laptop",
             1024,
-            files.clone(),
+            &files,
         )
         .expect("First indexing failed");
 
     fixture
         .indexing_service
         .insert_in_database(
-            "Personal".to_string(),
-            "Desktop".to_string(),
+            "Personal",
+            "Desktop",
             512,
-            files.clone(),
+            &files,
         )
         .expect("Second indexing failed");
 
     fixture
         .indexing_service
-        .insert_in_database("Work".to_string(), "Server".to_string(), 8192, files)
+        .insert_in_database("Work", "Server", 8192, &files)
         .expect("Third indexing failed");
 
     // Verify all files are indexed
     let all_files = fixture
         .query_service
-        .search_files(&None, &None, 0, 20)
+        .search_files(None, None, 0, 20)
         .unwrap();
     assert_eq!(all_files.len(), 12); // 4 files × 3 locations
 
@@ -613,21 +597,21 @@ fn test_edge_cases_and_error_handling() {
     // Test empty search
     let empty_result = fixture
         .query_service
-        .search_files(&None, &Some(String::new()), 0, 10)
+        .search_files(None, Some(""), 0, 10)
         .unwrap();
     assert_eq!(empty_result.len(), 0);
 
     // Test search with no matches
     let no_matches = fixture
         .query_service
-        .search_files(&None, &Some(String::from("nonexistent")), 0, 10)
+        .search_files(None, Some("nonexistent"), 0, 10)
         .unwrap();
     assert_eq!(no_matches.len(), 0);
 
     // Test pagination with no data
     let no_data = fixture
         .query_service
-        .search_files(&None, &None, 5, 10)
+        .search_files(None, None, 5, 10)
         .unwrap();
     assert_eq!(no_data.len(), 0);
     assert_eq!(no_data.len(), 0);
@@ -635,15 +619,15 @@ fn test_edge_cases_and_error_handling() {
     // Test remove duplicates with no data
     let remove_empty = fixture
         .indexing_service
-        .remove_duplicates("NonExistent".to_string(), "Drive".to_string());
+        .remove_duplicates("NonExistent", "Drive");
     assert!(remove_empty.is_ok());
 
     // Test indexing empty file list
     let empty_index = fixture.indexing_service.insert_in_database(
-        "Empty".to_string(),
-        "Drive".to_string(),
+        "Empty",
+        "Drive",
         0,
-        vec![],
+        &[],
     );
     assert!(empty_index.is_ok());
     assert_eq!(empty_index.unwrap(), 0);
@@ -651,7 +635,7 @@ fn test_edge_cases_and_error_handling() {
     // Test selected drive edge cases
     let empty_drive_name = fixture
         .query_service
-        .search_files(&Some(String::new()), &None, 0, 10)
+        .search_files(Some(""), None, 0, 10)
         .unwrap();
     assert_eq!(empty_drive_name.len(), 0);
 }
@@ -678,10 +662,10 @@ fn test_search_performance_with_large_dataset() {
     fixture
         .indexing_service
         .insert_in_database(
-            "Large".to_string(),
-            "Dataset".to_string(),
+            "Large",
+            "Dataset",
             16384,
-            large_dataset,
+            &large_dataset,
         )
         .expect("Large dataset indexing failed");
 
@@ -690,7 +674,7 @@ fn test_search_performance_with_large_dataset() {
     // Test search performance
     let search_result = fixture
         .query_service
-        .search_files(&None, &Some(String::from("category_5")), 0, 100)
+        .search_files(None, Some("category_5"), 0, 100)
         .unwrap();
 
     let elapsed = start.elapsed();
@@ -703,10 +687,214 @@ fn test_search_performance_with_large_dataset() {
     let start = Instant::now();
     let page_result = fixture
         .query_service
-        .search_files(&None, &None, 50, 100)
+        .search_files(None, None, 50, 100)
         .unwrap();
     let elapsed = start.elapsed();
 
     assert!(elapsed.as_millis() < 500);
     assert_eq!(page_result.len(), 100);
+}
+
+#[test]
+fn test_delete_entire_drive() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+    fixture
+        .indexing_service
+        .insert_in_database(
+            "Work",
+            "Laptop",
+            1024,
+            &files,
+        )
+        .unwrap();
+
+    fixture.delete_service.delete("Laptop", None).unwrap();
+
+    let result = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(result.is_empty());
+
+    let count = fixture
+        .query_service
+        .get_search_count(Some("Laptop"), None)
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn test_delete_specific_category() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+
+    fixture
+        .indexing_service
+        .insert_in_database(
+            "Work",
+            "Laptop",
+            1024,
+            &files,
+        )
+        .unwrap();
+    fixture
+        .indexing_service
+        .insert_in_database(
+            "Personal",
+            "Laptop",
+            1024,
+            &files,
+        )
+        .unwrap();
+
+    fixture
+        .delete_service
+        .delete("Laptop", Some("Work"))
+        .unwrap();
+
+    let result = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(result.iter().all(|f| f.category_name != "Work"));
+    assert!(result.iter().any(|f| f.category_name == "Personal"));
+    let count = fixture
+        .query_service
+        .get_search_count(Some("Laptop"), None)
+        .unwrap();
+    assert_eq!(count, files.len() as u64); // only Personal category files remain
+}
+
+#[test]
+fn test_delete_nonexistent_drive_or_category() {
+    let fixture = TestFixture::new();
+    fixture
+        .delete_service
+        .delete("NonexistentDrive", None)
+        .unwrap();
+    fixture
+        .delete_service
+        .delete("Laptop", Some("NonexistentCategory"))
+        .unwrap();
+}
+
+#[test]
+fn test_delete_entire_drive_removes_stale_categories() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+
+    // Insert files in two categories
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Laptop", 1024, &files)
+        .unwrap();
+    fixture
+        .indexing_service
+        .insert_in_database("Personal", "Laptop", 1024, &files)
+        .unwrap();
+
+    // Make sure categories exist
+    let categories_before: Vec<String> = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(categories_before.contains(&"Work".to_string()));
+    assert!(categories_before.contains(&"Personal".to_string()));
+
+    // Delete the entire drive
+    fixture.delete_service.delete("Laptop", None).unwrap();
+
+    // Drive files should be gone
+    let result = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(result.is_empty());
+
+    // Stale categories should be removed
+    let categories_after: Vec<String> = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(!categories_after.contains(&"Work".to_string()));
+    assert!(!categories_after.contains(&"Personal".to_string()));
+}
+
+#[test]
+fn test_delete_specific_category_removes_stale_category() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+
+    // Insert files in two categories
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Laptop", 1024, &files)
+        .unwrap();
+    fixture
+        .indexing_service
+        .insert_in_database("Personal", "Laptop", 1024, &files)
+        .unwrap();
+
+    // Delete a specific category
+    fixture
+        .delete_service
+        .delete("Laptop", Some("Work"))
+        .unwrap();
+
+    // Work files should be gone, Personal files remain
+    let remaining_files = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(remaining_files.iter().all(|f| f.category_name != "Work"));
+    assert!(remaining_files.iter().any(|f| f.category_name == "Personal"));
+
+    // Stale category 'Work' should be removed
+    let categories_after: Vec<String> = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(!categories_after.contains(&"Work".to_string()));
+    assert!(categories_after.contains(&"Personal".to_string()));
+}
+
+#[test]
+fn test_category_not_deleted_if_used_by_another_drive() {
+    let fixture = TestFixture::new();
+    let files = TestFixture::create_test_files();
+
+    // Index the same category "Work" on two drives
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Laptop", 1024, &files)
+        .unwrap();
+    fixture
+        .indexing_service
+        .insert_in_database("Work", "Desktop", 2048, &files)
+        .unwrap();
+
+    // Delete all files on Laptop
+    fixture.delete_service.delete("Laptop", None).unwrap();
+
+    // Verify Laptop has no files
+    let laptop_files = fixture
+        .query_service
+        .search_files(Some("Laptop"), None, 0, 10)
+        .unwrap();
+    assert!(laptop_files.is_empty());
+
+    // Verify category "Work" still exists because Desktop uses it
+    let desktop_categories = fixture
+        .query_service
+        .list_category_names_for_drive("Desktop")
+        .unwrap();
+    assert!(desktop_categories.contains(&"Work".to_string()));
+
+    // Verify "Work" is not listed as stale globally
+    let laptop_categories = fixture
+        .query_service
+        .list_category_names_for_drive("Laptop")
+        .unwrap();
+    assert!(!laptop_categories.contains(&"Work".to_string()));
 }

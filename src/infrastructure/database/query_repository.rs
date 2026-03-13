@@ -50,22 +50,21 @@ impl QueryRepository {
     /// - A [`Database`](RepositoryError::Database) error occurs during query execution.
     pub fn count_search_results(
         &self,
-        selected_drive: &Option<String>,
-        query: &Option<String>,
+        selected_drive: Option<&str>,
+        query: Option<&str>,
     ) -> Result<u64, RepositoryError> {
-        let selected_drive = selected_drive.clone();
-        let search_pattern = query.as_ref().map(Self::search_pattern);
+        let search_pattern = query.map(Self::search_pattern);
 
         self.pool.execute_db_operation(move |conn| {
             let mut query_builder = file_entries::table
                 .inner_join(drive_entries::table)
                 .into_boxed();
 
-            if let Some(drive) = &selected_drive {
+            if let Some(drive) = selected_drive {
                 query_builder = query_builder.filter(drive_entries::name.eq(drive));
             }
 
-            if let Some(pattern) = &search_pattern {
+            if let Some(pattern) = search_pattern {
                 query_builder = query_builder.filter(file_entries::path.like(pattern));
             }
 
@@ -86,13 +85,12 @@ impl QueryRepository {
     /// - A [`Database`](RepositoryError::Database) error occurs during query execution.
     pub fn search_files_paginated(
         &self,
-        selected_drive: &Option<String>,
-        query: &Option<String>,
+        selected_drive: Option<&str>,
+        query: Option<&str>,
         offset: u64,
         limit: u64,
     ) -> Result<Vec<FileWithMetadata>, RepositoryError> {
-        let selected_drive = selected_drive.clone();
-        let search_pattern = query.as_ref().map(Self::search_pattern);
+        let search_pattern = query.map(Self::search_pattern);
 
         self.pool.execute_db_operation(move |conn| {
             let mut query_builder = file_entries::table
@@ -107,11 +105,11 @@ impl QueryRepository {
                 ))
                 .into_boxed();
 
-            if let Some(drive) = &selected_drive {
+            if let Some(drive) = selected_drive {
                 query_builder = query_builder.filter(drive_entries::name.eq(drive));
             }
 
-            if let Some(search) = &search_pattern {
+            if let Some(search) = search_pattern {
                 query_builder = query_builder.filter(file_entries::path.like(search));
             }
 
@@ -129,7 +127,29 @@ impl QueryRepository {
         })
     }
 
-    fn search_pattern(query: &String) -> String {
+    fn search_pattern(query: &str) -> String {
         format!("%{query}%").replace(' ', "_")
+    }
+
+    /// Retrieves all used category names from the database based on a drive name.
+    ///
+    /// Returns a sorted list of unique used category names.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during query execution.
+    pub fn find_all_category_names_for_drive(&self, drive: &str) -> Result<Vec<String>, RepositoryError> {
+        self.pool.execute_db_operation(|conn| {
+            let categories = drive_entries::table
+                .inner_join(file_categories::table)
+                .filter(drive_entries::name.eq(drive))
+                .select(file_categories::name)
+                .distinct()
+                .order(file_categories::name)
+                .load::<String>(conn)?;
+            Ok(categories)
+        })
     }
 }

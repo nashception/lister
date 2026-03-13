@@ -1,5 +1,5 @@
-use crate::domain::model::file_entry::FileEntry;
 use crate::domain::errors::domain_error::DomainError;
+use crate::domain::model::file_entry::FileEntry;
 use jwalk::{DirEntry, WalkDir};
 use std::path::{Path, StripPrefixError};
 

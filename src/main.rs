@@ -11,7 +11,7 @@ fn main() -> iced::Result {
     self_update();
 
     iced::application(|| ListerApp::new(ListerAppService::create()), ListerApp::update, ListerApp::view)
-        .subscription(|state| state.subscription())
+        .subscription(ListerApp::subscription)
         .window(ListerApp::window())
         .run()
 }

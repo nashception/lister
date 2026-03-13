@@ -3,13 +3,13 @@ use crate::domain::model::file_entry::FileEntry;
 
 #[derive(Clone, Debug)]
 pub enum WriteMessage {
-    DirectoryPressed { dialog_title: String},
-    DirectoryChanged(Option<DirectoryData>),
     CategoryChanged(String),
-    DiskChanged(String),
     DatabaseCleaned,
-    WriteSubmit,
-    ScanDirectoryFinished(Vec<FileEntry>),
+    DirectoryPressed { dialog_title: String },
+    DirectoryChanged(Option<DirectoryData>),
+    DiskChanged(String),
     InsertInDatabaseFinished(usize),
     ResetForm,
+    ScanDirectoryFinished(Vec<FileEntry>),
+    WriteSubmit,
 }
