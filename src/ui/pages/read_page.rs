@@ -7,8 +7,8 @@ use crate::domain::model::file_entry::FileWithMetadata;
 use crate::domain::model::language::Language;
 use crate::domain::model::pagination::PaginatedResult;
 use crate::tr;
+use crate::ui::components::drive_combo_box::DriveComboBox;
 use crate::ui::components::read::cache::Cache;
-use crate::ui::components::read::drive_combo_box::DriveComboBox;
 use crate::ui::components::read::file_list::FileList;
 use crate::ui::components::read::pagination::Pagination;
 use crate::ui::components::read::search::Search;
@@ -95,7 +95,7 @@ impl ReadPage {
                     self.drive_combo_box.selected_drive = Some(drive);
                     self.process_new_search()
                 }
-            }
+            },
             ReadMessage::EndPressed => self.file_list.snap_to_bottom(),
             ReadMessage::FilesLoaded(result) => self.handle_files_loaded(result),
             ReadMessage::FirstPage => self.navigate_to_page(0),

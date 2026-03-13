@@ -67,4 +67,17 @@ impl FileQueryService {
             .search_files_paginated(selected_drive, query, offset, limit)
             .map_err(DomainError::from)
     }
+
+    /// Retrieves all used category names based on a drive name.
+    ///
+    /// Returns a list of distinct category names accessible in the system.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DomainError`] if:
+    /// - A [`Repository`](DomainError::Repository) error occurs while fetching drive names from storage.
+    pub fn list_category_names_for_drive(&self, drive: &str) -> Result<Vec<String>, DomainError> {
+        let drives = self.query_repo.find_all_category_names_for_drive(drive)?;
+        Ok(drives)
+    }
 }

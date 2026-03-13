@@ -90,38 +90,44 @@ impl ListerApp {
                 Page::Read(_) => self.update(AppMessage::GoToWrite),
                 Page::Write(_) => self.update(AppMessage::GoToDelete),
             }
-            AppMessage::Delete(message) => Task::none(),
+            AppMessage::Delete(msg) => {
+                if let Page::Delete(page) = &mut self.current_page {
+                    page.update(msg).map(AppMessage::Delete)
+                } else {
+                    Task::none()
+                }
+            }
             AppMessage::GoToDelete => {
-                if !matches!(self.current_page, Page::Delete(_)) {
+                if matches!(self.current_page, Page::Delete(_)) {
+                    Task::none()
+                } else {
                     let (delete_page, task) = DeletePage::new(
                         self.service.delete_use_case.clone(),
                         self.service.query_use_case.clone(),
                     );
                     self.current_page = Page::Delete(delete_page);
                     task.map(AppMessage::Delete)
-                } else {
-                    Task::none()
                 }
             }
             AppMessage::GoToRead => {
-                if !matches!(self.current_page, Page::Read(_)) {
+                if matches!(self.current_page, Page::Read(_)) {
+                    Task::none()
+                } else {
                     let (read_page, task) = ReadPage::new(self.service.query_use_case.clone());
                     self.current_page = Page::Read(read_page);
                     task.map(AppMessage::Read)
-                } else {
-                    Task::none()
                 }
             }
             AppMessage::GoToWrite => {
-                if !matches!(self.current_page, Page::Write(_)) {
+                if matches!(self.current_page, Page::Write(_)) {
+                    Task::none()
+                } else {
                     let (write_page, task) = WritePage::new(
                         self.service.indexing_use_case.clone(),
                         self.service.directory_picker.clone(),
                     );
                     self.current_page = Page::Write(write_page);
                     task.map(AppMessage::Write)
-                } else {
-                    Task::none()
                 }
             }
             AppMessage::LanguageChanged(language, translations) => {
@@ -172,9 +178,8 @@ impl ListerApp {
         });
 
         let page_subscription = match &self.current_page {
-            Page::Delete(_) => Subscription::none(),
+            Page::Delete(_) | Page::Write(_) => Subscription::none(),
             Page::Read(_) => ReadPage::subscription().map(AppMessage::Read),
-            Page::Write(_) => Subscription::none(),
         };
 
         Subscription::batch(vec![app_subscription, page_subscription])

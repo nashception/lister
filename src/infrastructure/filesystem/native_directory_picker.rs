@@ -18,6 +18,7 @@ mod linux_runtime {
 pub struct NativeDirectoryPicker;
 
 impl NativeDirectoryPicker {
+    #[must_use]
     pub fn pick_directory(&self, title: &str) -> Option<DirectoryData> {
         #[cfg(target_os = "linux")]
         {

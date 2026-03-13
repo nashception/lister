@@ -130,4 +130,26 @@ impl QueryRepository {
     fn search_pattern(query: &str) -> String {
         format!("%{query}%").replace(' ', "_")
     }
+
+    /// Retrieves all used category names from the database based on a drive name.
+    ///
+    /// Returns a sorted list of unique used category names.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during query execution.
+    pub fn find_all_category_names_for_drive(&self, drive: &str) -> Result<Vec<String>, RepositoryError> {
+        self.pool.execute_db_operation(|conn| {
+            let categories = drive_entries::table
+                .inner_join(file_categories::table)
+                .filter(drive_entries::name.eq(drive))
+                .select(file_categories::name)
+                .distinct()
+                .order(file_categories::name)
+                .load::<String>(conn)?;
+            Ok(categories)
+        })
+    }
 }
