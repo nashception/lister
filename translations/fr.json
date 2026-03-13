@@ -1,4 +1,6 @@
 {
+  "delete_page_title": "Listeur - Suppression",
+  "delete_page": "Suppression",
   "read_page_title": "Listeur - Lecture",
   "read_page": "Lecture",
   "write_page": "Écriture",

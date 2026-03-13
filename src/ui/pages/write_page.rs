@@ -64,6 +64,11 @@ impl WritePage {
 
     pub fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
         match message {
+            WriteMessage::CategoryChanged(value) => {
+                self.write_data.category = value;
+                Task::none()
+            }
+            WriteMessage::DatabaseCleaned => self.start_indexing(),
             WriteMessage::DirectoryPressed { dialog_title } => {
                 let picker = self.directory_picker.clone();
                 Task::perform(
@@ -82,18 +87,9 @@ impl WritePage {
                 }
                 Task::none()
             }
-            WriteMessage::CategoryChanged(value) => {
-                self.write_data.category = value;
-                Task::none()
-            }
             WriteMessage::DiskChanged(value) => {
                 self.write_data.drive = value;
                 Task::none()
-            }
-            WriteMessage::WriteSubmit => self.clean_database(),
-            WriteMessage::DatabaseCleaned => self.start_indexing(),
-            WriteMessage::ScanDirectoryFinished(scanned_files) => {
-                self.insert_in_database(scanned_files)
             }
             WriteMessage::InsertInDatabaseFinished(count) => {
                 self.state = IndexingState::Completed {
@@ -105,6 +101,10 @@ impl WritePage {
                 self.state = IndexingState::Ready;
                 Task::none()
             }
+            WriteMessage::ScanDirectoryFinished(scanned_files) => {
+                self.insert_in_database(scanned_files)
+            }
+            WriteMessage::WriteSubmit => self.clean_database(),
         }
     }
 

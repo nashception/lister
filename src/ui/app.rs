@@ -2,6 +2,7 @@ use crate::domain::model::language::Language;
 use crate::tr;
 use crate::ui::app_factory::ListerAppService;
 use crate::ui::messages::app_message::AppMessage;
+use crate::ui::pages::delete_page::DeletePage;
 use crate::ui::pages::read_page::ReadPage;
 use crate::ui::pages::write_page::WritePage;
 use crate::utils::dialogs::popup_error;
@@ -14,6 +15,7 @@ use iced::{event, keyboard, Alignment, Element, Event, Length, Subscription, Tas
 use std::collections::HashMap;
 
 enum Page {
+    Delete(DeletePage),
     Read(ReadPage),
     Write(WritePage),
 }
@@ -55,6 +57,7 @@ impl ListerApp {
         format!(
             "{} (v{})",
             match &self.current_page {
+                Page::Delete(_) => DeletePage::title(&self.translations),
                 Page::Read(_) => ReadPage::title(&self.translations),
                 Page::Write(_) => WritePage::title(&self.translations),
             },
@@ -67,6 +70,7 @@ impl ListerApp {
         let nav_bar = self.nav_bar();
 
         let content = match &self.current_page {
+            Page::Delete(page) => page.view(&self.translations).map(AppMessage::Delete),
             Page::Read(page) => page
                 .view(&self.translations, &self.current_language)
                 .map(AppMessage::Read),
@@ -81,13 +85,26 @@ impl ListerApp {
     pub fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
         match message {
             AppMessage::ChangeLanguage(language) => self.change_language(language),
-            AppMessage::LanguageChanged(language, translations) => {
-                self.current_language = language;
-                self.translations = translations;
-                Task::none()
+            AppMessage::ChangePage => match self.current_page {
+                Page::Delete(_) => self.update(AppMessage::GoToRead),
+                Page::Read(_) => self.update(AppMessage::GoToWrite),
+                Page::Write(_) => self.update(AppMessage::GoToDelete),
+            }
+            AppMessage::Delete(message) => Task::none(),
+            AppMessage::GoToDelete => {
+                if !matches!(self.current_page, Page::Delete(_)) {
+                    let (delete_page, task) = DeletePage::new(
+                        self.service.delete_use_case.clone(),
+                        self.service.query_use_case.clone(),
+                    );
+                    self.current_page = Page::Delete(delete_page);
+                    task.map(AppMessage::Delete)
+                } else {
+                    Task::none()
+                }
             }
             AppMessage::GoToRead => {
-                if matches!(self.current_page, Page::Write(_)) {
+                if !matches!(self.current_page, Page::Read(_)) {
                     let (read_page, task) = ReadPage::new(self.service.query_use_case.clone());
                     self.current_page = Page::Read(read_page);
                     task.map(AppMessage::Read)
@@ -96,7 +113,7 @@ impl ListerApp {
                 }
             }
             AppMessage::GoToWrite => {
-                if matches!(self.current_page, Page::Read(_)) {
+                if !matches!(self.current_page, Page::Write(_)) {
                     let (write_page, task) = WritePage::new(
                         self.service.indexing_use_case.clone(),
                         self.service.directory_picker.clone(),
@@ -107,16 +124,14 @@ impl ListerApp {
                     Task::none()
                 }
             }
+            AppMessage::LanguageChanged(language, translations) => {
+                self.current_language = language;
+                self.translations = translations;
+                Task::none()
+            }
             AppMessage::Read(msg) => {
                 if let Page::Read(page) = &mut self.current_page {
                     page.update(msg).map(AppMessage::Read)
-                } else {
-                    Task::none()
-                }
-            }
-            AppMessage::Write(msg) => {
-                if let Page::Write(page) = &mut self.current_page {
-                    page.update(msg).map(AppMessage::Write)
                 } else {
                     Task::none()
                 }
@@ -128,10 +143,13 @@ impl ListerApp {
                     focus_next()
                 }
             }
-            AppMessage::ChangePage => match self.current_page {
-                Page::Read(_) => self.update(AppMessage::GoToWrite),
-                Page::Write(_) => self.update(AppMessage::GoToRead),
-            },
+            AppMessage::Write(msg) => {
+                if let Page::Write(page) = &mut self.current_page {
+                    page.update(msg).map(AppMessage::Write)
+                } else {
+                    Task::none()
+                }
+            }
         }
     }
 
@@ -154,6 +172,7 @@ impl ListerApp {
         });
 
         let page_subscription = match &self.current_page {
+            Page::Delete(_) => Subscription::none(),
             Page::Read(_) => ReadPage::subscription().map(AppMessage::Read),
             Page::Write(_) => Subscription::none(),
         };
@@ -171,16 +190,26 @@ impl ListerApp {
         row![
             button(text(tr!(&self.translations, "read_page")).align_x(Alignment::Center))
                 .on_press(AppMessage::GoToRead)
-                .style(match &self.current_page {
-                    Page::Read(_) => button::primary,
-                    Page::Write(_) => button::secondary,
+                .style(if matches!(&self.current_page, Page::Read(_)) {
+                    button::primary
+                } else {
+                    button::secondary
                 })
                 .width(Length::Fill),
             button(text(tr!(&self.translations, "write_page")).align_x(Alignment::Center))
                 .on_press(AppMessage::GoToWrite)
-                .style(match &self.current_page {
-                    Page::Read(_) => button::secondary,
-                    Page::Write(_) => button::primary,
+                .style(if matches!(&self.current_page, Page::Write(_)) {
+                    button::primary
+                } else {
+                    button::secondary
+                })
+                .width(Length::Fill),
+            button(text(tr!(&self.translations, "delete_page")).align_x(Alignment::Center))
+                .on_press(AppMessage::GoToDelete)
+                .style(if matches!(&self.current_page, Page::Delete(_)) {
+                    button::primary
+                } else {
+                    button::secondary
                 })
                 .width(Length::Fill)
         ]
