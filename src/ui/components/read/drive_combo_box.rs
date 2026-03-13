@@ -1,6 +1,6 @@
 use crate::application::file_query_service::FileQueryService;
 use crate::tr;
-use crate::ui::messages::read_message::ReadMessage;
+use crate::ui::messages::drive_combo_box::DriveComboBoxMessage;
 use crate::utils::dialogs::popup_error;
 use iced::widget::pick_list;
 use iced::{Element, Task};
@@ -13,7 +13,7 @@ pub struct DriveComboBox {
 }
 
 impl DriveComboBox {
-    pub fn new(query_use_case: Arc<FileQueryService>) -> (Self, Task<ReadMessage>) {
+    pub fn new(query_use_case: Arc<FileQueryService>) -> (Self, Task<DriveComboBoxMessage>) {
         (
             Self {
                 drives: vec![],
@@ -26,16 +26,19 @@ impl DriveComboBox {
                         vec![]
                     })
                 },
-                ReadMessage::DrivesFetched,
+                DriveComboBoxMessage::DrivesFetched,
             ),
         )
     }
 
-    pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, ReadMessage> {
+    pub fn view(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, DriveComboBoxMessage> {
         pick_list(
             self.drives.clone(),
             self.selected_drive.clone(),
-            ReadMessage::DriveSelected,
+            DriveComboBoxMessage::DriveSelected,
         )
         .placeholder(tr!(translations, "select_drive_placeholder"))
         .into()
