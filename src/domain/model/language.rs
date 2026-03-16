@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Language {
     English,
@@ -27,5 +29,17 @@ impl Language {
             Self::English => Self::French,
             Self::French => Self::English,
         }
+    }
+}
+
+impl Display for Language {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(
+            match self {
+                Self::English => "EN",
+                Self::French => "FR",
+            },
+            f,
+        )
     }
 }

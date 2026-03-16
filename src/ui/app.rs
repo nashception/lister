@@ -66,7 +66,8 @@ impl ListerApp {
     }
 
     pub fn view(&'_ self) -> Element<'_, AppMessage> {
-        let language_toggle = self.language_toggle();
+        let toolbar = self.toolbar();
+
         let nav_bar = self.nav_bar();
 
         let content = match &self.current_page {
@@ -77,7 +78,7 @@ impl ListerApp {
             Page::Write(page) => page.view(&self.translations).map(AppMessage::Write),
         };
 
-        column![language_toggle, Space::new().height(10), nav_bar, content]
+        column![toolbar, Space::new().height(10), nav_bar, content]
             .padding(20)
             .into()
     }
@@ -89,7 +90,8 @@ impl ListerApp {
                 Page::Delete(_) => self.update(AppMessage::GoToRead),
                 Page::Read(_) => self.update(AppMessage::GoToWrite),
                 Page::Write(_) => self.update(AppMessage::GoToDelete),
-            }
+            },
+            AppMessage::CompactDatabase => Task::none(),
             AppMessage::Delete(msg) => {
                 if let Page::Delete(page) = &mut self.current_page {
                     page.update(msg).map(AppMessage::Delete)
@@ -222,18 +224,17 @@ impl ListerApp {
         .into()
     }
 
-    fn language_toggle(&'_ self) -> Element<'_, AppMessage> {
-        let label = match self.current_language {
-            Language::English => "EN",
-            Language::French => "FR",
-        };
-
-        let toggle_button = button(text(label))
-            .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()));
-
-        row![Space::new().width(Length::Fill), toggle_button]
-            .width(Length::Fill)
-            .into()
+    fn toolbar(&'_ self) -> Element<'_, AppMessage> {
+        row![
+            Space::new().width(Length::Fill),
+            button(text(tr!(&self.translations, "compact")))
+                .on_press(AppMessage::CompactDatabase),
+            button(text(self.current_language.to_string()))
+                .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()))
+        ]
+        .spacing(5)
+        .width(Length::Fill)
+        .into()
     }
 
     fn change_language(&self, language: Language) -> Task<AppMessage> {
