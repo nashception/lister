@@ -7,6 +7,7 @@
   "clean_status": "[CLEAN] Nettoyage de la base de donnée",
   "clear_button": "Effacer",
   "compact": "Compacter",
+  "compacted": "Base de données compactée, {freed_space} libérés",
   "delete_completed": "La suppression est terminée.",
   "delete_page": "Suppression",
   "delete_page_title": "Listeur - Suppression",

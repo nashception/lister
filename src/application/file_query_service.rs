@@ -19,7 +19,7 @@ impl FileQueryService {
     /// # Errors
     ///
     /// Returns a [`DomainError`] if:
-    /// - A [`Repository`](DomainError::Repository) error occurs while fetching drive names from storage.
+    /// - A [`Repository`](DomainError::RepositoryFailure) error occurs while fetching drive names from storage.
     pub fn list_drive_names(&self) -> Result<Vec<String>, DomainError> {
         let drives = self.query_repo.find_all_drive_names()?;
         Ok(drives)
@@ -32,7 +32,7 @@ impl FileQueryService {
     /// # Errors
     ///
     /// Returns a [`DomainError`] if:
-    /// - A [`Repository`](DomainError::Repository) error occurs while executing the count query.
+    /// - A [`Repository`](DomainError::RepositoryFailure) error occurs while executing the count query.
     pub fn get_search_count(
         &self,
         selected_drive: Option<&str>,
@@ -52,7 +52,7 @@ impl FileQueryService {
     /// # Errors
     ///
     /// Returns a [`DomainError`] if:
-    /// - A [`Repository`](DomainError::Repository) error occurs while executing the search query.
+    /// - A [`Repository`](DomainError::RepositoryFailure) error occurs while executing the search query.
     pub fn search_files(
         &self,
         selected_drive: Option<&str>,
@@ -75,9 +75,27 @@ impl FileQueryService {
     /// # Errors
     ///
     /// Returns a [`DomainError`] if:
-    /// - A [`Repository`](DomainError::Repository) error occurs while fetching drive names from storage.
+    /// - A [`Repository`](DomainError::RepositoryFailure) error occurs while fetching drive names from storage.
     pub fn list_category_names_for_drive(&self, drive: &str) -> Result<Vec<String>, DomainError> {
         let drives = self.query_repo.find_all_category_names_for_drive(drive)?;
         Ok(drives)
+    }
+
+    /// Compacts the database and returns the reclaimed disk space.
+    ///
+    /// This operation runs a database compaction which rebuilds the database
+    /// file and removes unused space. The returned value represents the number
+    /// of bytes reclaimed after the operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DomainError`] if:
+    /// - A [`Repository`](DomainError::RepositoryFailure) error occurs while executing the compaction.
+    /// - An [`Io`](DomainError::IoError) error occurs while reading the database file metadata.
+    pub fn compact(&self) -> Result<u64, DomainError> {
+        let size_before = std::fs::metadata("app.db")?.len();
+        self.query_repo.compact()?;
+        let size_after = std::fs::metadata("app.db")?.len();
+        Ok(size_before - size_after)
     }
 }

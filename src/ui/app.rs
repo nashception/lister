@@ -5,7 +5,8 @@ use crate::ui::messages::app_message::AppMessage;
 use crate::ui::pages::delete_page::DeletePage;
 use crate::ui::pages::read_page::ReadPage;
 use crate::ui::pages::write_page::WritePage;
-use crate::utils::dialogs::popup_error;
+use crate::utils::dialogs::{popup_error, popup_info};
+use humansize::{format_size, DECIMAL};
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;
 use iced::widget::operation::{focus_next, focus_previous};
@@ -91,7 +92,24 @@ impl ListerApp {
                 Page::Read(_) => self.update(AppMessage::GoToWrite),
                 Page::Write(_) => self.update(AppMessage::GoToDelete),
             },
-            AppMessage::CompactDatabase => Task::none(),
+            AppMessage::CompactDatabase => {
+                let query_use_case = self.service.query_use_case.clone();
+                Task::perform(
+                    async move {
+                        query_use_case.compact().unwrap_or_else(|err| {
+                            popup_error(err);
+                            0
+                        })
+                    },
+                    AppMessage::DatabaseCompacted,
+                )
+            }
+            AppMessage::DatabaseCompacted(freed_space) => {
+                popup_info(
+                    tr!(&self.translations, "compacted", "freed_space" => &format_size(freed_space, DECIMAL)),
+                );
+                Task::none()
+            }
             AppMessage::Delete(msg) => {
                 if let Page::Delete(page) = &mut self.current_page {
                     page.update(msg).map(AppMessage::Delete)
@@ -227,8 +245,7 @@ impl ListerApp {
     fn toolbar(&'_ self) -> Element<'_, AppMessage> {
         row![
             Space::new().width(Length::Fill),
-            button(text(tr!(&self.translations, "compact")))
-                .on_press(AppMessage::CompactDatabase),
+            button(text(tr!(&self.translations, "compact"))).on_press(AppMessage::CompactDatabase),
             button(text(self.current_language.to_string()))
                 .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()))
         ]
