@@ -5,7 +5,8 @@ use crate::ui::messages::app_message::AppMessage;
 use crate::ui::pages::delete_page::DeletePage;
 use crate::ui::pages::read_page::ReadPage;
 use crate::ui::pages::write_page::WritePage;
-use crate::utils::dialogs::popup_error;
+use crate::utils::dialogs::{popup_error, popup_info};
+use humansize::{format_size, DECIMAL};
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;
 use iced::widget::operation::{focus_next, focus_previous};
@@ -66,7 +67,8 @@ impl ListerApp {
     }
 
     pub fn view(&'_ self) -> Element<'_, AppMessage> {
-        let language_toggle = self.language_toggle();
+        let toolbar = self.toolbar();
+
         let nav_bar = self.nav_bar();
 
         let content = match &self.current_page {
@@ -77,7 +79,7 @@ impl ListerApp {
             Page::Write(page) => page.view(&self.translations).map(AppMessage::Write),
         };
 
-        column![language_toggle, Space::new().height(10), nav_bar, content]
+        column![toolbar, Space::new().height(10), nav_bar, content]
             .padding(20)
             .into()
     }
@@ -89,6 +91,24 @@ impl ListerApp {
                 Page::Delete(_) => self.update(AppMessage::GoToRead),
                 Page::Read(_) => self.update(AppMessage::GoToWrite),
                 Page::Write(_) => self.update(AppMessage::GoToDelete),
+            },
+            AppMessage::CompactDatabase => {
+                let query_use_case = self.service.query_use_case.clone();
+                Task::perform(
+                    async move {
+                        query_use_case.compact().unwrap_or_else(|err| {
+                            popup_error(err);
+                            0
+                        })
+                    },
+                    AppMessage::DatabaseCompacted,
+                )
+            }
+            AppMessage::DatabaseCompacted(freed_space) => {
+                popup_info(
+                    tr!(&self.translations, "compacted", "freed_space" => &format_size(freed_space, DECIMAL)),
+                );
+                Task::none()
             }
             AppMessage::Delete(msg) => {
                 if let Page::Delete(page) = &mut self.current_page {
@@ -222,18 +242,16 @@ impl ListerApp {
         .into()
     }
 
-    fn language_toggle(&'_ self) -> Element<'_, AppMessage> {
-        let label = match self.current_language {
-            Language::English => "EN",
-            Language::French => "FR",
-        };
-
-        let toggle_button = button(text(label))
-            .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()));
-
-        row![Space::new().width(Length::Fill), toggle_button]
-            .width(Length::Fill)
-            .into()
+    fn toolbar(&'_ self) -> Element<'_, AppMessage> {
+        row![
+            Space::new().width(Length::Fill),
+            button(text(tr!(&self.translations, "compact"))).on_press(AppMessage::CompactDatabase),
+            button(text(self.current_language.to_string()))
+                .on_press(AppMessage::ChangeLanguage(self.current_language.toggle()))
+        ]
+        .spacing(5)
+        .width(Length::Fill)
+        .into()
     }
 
     fn change_language(&self, language: Language) -> Task<AppMessage> {

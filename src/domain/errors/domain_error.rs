@@ -4,4 +4,6 @@ pub enum DomainError {
     RepositoryFailure(String),
     #[error("Directory scan failed: {0}")]
     DirectoryScannerError(String),
+    #[error("Error reading file metadata: {0}")]
+    IoError(#[from] std::io::Error),
 }

@@ -1,3 +1,4 @@
+mod binary_format;
 pub mod command_repository;
 mod conversion;
 pub mod entities;

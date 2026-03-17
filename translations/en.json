@@ -6,6 +6,8 @@
   "clean_details": "Finding files to delete...",
   "clean_status": "[CLEAN] Cleaning database",
   "clear_button": "Clear",
+  "compact": "Compact",
+  "compacted": "Compacted database, freed {freed_space}",
   "delete_completed": "Deletion is done.",
   "delete_page": "Delete",
   "delete_page_title": "Lister - Delete",

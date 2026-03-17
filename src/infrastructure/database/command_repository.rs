@@ -12,6 +12,7 @@ use diesel::{QueryDsl, RunQueryDsl, SqliteConnection};
 use rayon::prelude::*;
 use std::sync::Arc;
 use uuid::Uuid;
+use crate::infrastructure::database::binary_format::UuidSqlite;
 
 /// Repository for write operations on files, drives, and categories.
 pub struct CommandRepository {
@@ -71,8 +72,8 @@ impl CommandRepository {
     ) -> Result<usize, RepositoryError> {
         self.pool.execute_in_transaction(|conn| {
             let category_id = Self::save_category(category, conn)?;
-            let drive_id = Self::save_drive(drive, drive_available_space, &category_id, conn)?;
-            Self::save_files(files, &drive_id, conn)
+            let drive_id = Self::save_drive(drive, drive_available_space, category_id, conn)?;
+            Self::save_files(files, drive_id, conn)
         })
     }
 
@@ -120,48 +121,47 @@ impl CommandRepository {
         })
     }
 
-    fn save_category(category: &str, conn: &mut SqliteConnection) -> Result<Uuid, RepositoryError> {
+    fn save_category(category: &str, conn: &mut SqliteConnection) -> Result<UuidSqlite, RepositoryError> {
         if let Ok(existing_id) = file_categories::table
             .filter(file_categories::name.eq(category))
             .select(file_categories::id)
-            .first::<String>(conn)
+            .first::<UuidSqlite>(conn)
         {
-            return Ok(Uuid::parse_str(&existing_id).unwrap());
+            return Ok(existing_id);
         }
 
-        let category_id: String = diesel::insert_into(file_categories::table)
+        let category_id: UuidSqlite = diesel::insert_into(file_categories::table)
             .values(NewFileCategoryDto {
-                id: Uuid::new_v4().to_string(),
+                id: UuidSqlite(Uuid::now_v7()),
                 name: category.to_string(),
             })
             .returning(file_categories::id)
             .get_result(conn)?;
-        Ok(Uuid::parse_str(&category_id).unwrap())
+        Ok(category_id)
     }
 
     fn save_drive(
         drive: &str,
         drive_available_space: u64,
-        category_id: &Uuid,
+        category_id: UuidSqlite,
         conn: &mut SqliteConnection,
-    ) -> Result<Uuid, RepositoryError> {
-        let category_id_string = category_id.to_string();
+    ) -> Result<UuidSqlite, RepositoryError> {
         if let Ok(existing_id) = drive_entries::table
             .filter(
                 drive_entries::name
                     .eq(drive)
-                    .and(drive_entries::category_id.eq(&category_id_string)),
+                    .and(drive_entries::category_id.eq(&category_id)),
             )
             .select(drive_entries::id)
-            .first::<String>(conn)
+            .first::<UuidSqlite>(conn)
         {
-            return Ok(Uuid::parse_str(&existing_id).unwrap());
+            return Ok(existing_id);
         }
 
-        let drive_id: String = diesel::insert_into(drive_entries::table)
+        let drive_id: UuidSqlite = diesel::insert_into(drive_entries::table)
             .values(NewDriveEntryDto {
-                id: Uuid::new_v4().to_string(),
-                category_id: category_id_string,
+                id: UuidSqlite(Uuid::now_v7()),
+                category_id,
                 name: drive.to_string(),
                 available_space: drive_available_space.to_i64_or_zero(),
                 insertion_time: Local::now().naive_local(),
@@ -171,7 +171,7 @@ impl CommandRepository {
 
         Self::update_same_drives_available_space(drive, drive_available_space, conn)?;
 
-        Ok(Uuid::parse_str(&drive_id).unwrap())
+        Ok(drive_id)
     }
 
     fn update_same_drives_available_space(
@@ -187,7 +187,7 @@ impl CommandRepository {
 
     fn save_files(
         files: &[FileEntry],
-        drive_id: &Uuid,
+        drive_id: UuidSqlite,
         conn: &mut SqliteConnection,
     ) -> Result<usize, RepositoryError> {
         let dto_files: Vec<NewFileEntryDto> = files

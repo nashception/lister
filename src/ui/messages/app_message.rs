@@ -8,6 +8,8 @@ use crate::ui::messages::delete_message::DeleteMessage;
 pub enum AppMessage {
     ChangeLanguage(Language),
     ChangePage,
+    CompactDatabase,
+    DatabaseCompacted(u64),
     Delete(DeleteMessage),
     LanguageChanged(Language, HashMap<String, String>),
     GoToDelete,

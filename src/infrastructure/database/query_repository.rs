@@ -152,4 +152,21 @@ impl QueryRepository {
             Ok(categories)
         })
     }
+
+    /// Compacts the `SQLite` database file.
+    ///
+    /// This operation runs the `VACUUM` command, which rebuilds the database
+    /// file to reclaim unused space and reduce fragmentation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RepositoryError`] if:
+    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](RepositoryError::Database) error occurs during query execution.
+    pub fn compact(&self) -> Result<(), RepositoryError> {
+        self.pool.execute_db_operation(|conn| {
+            diesel::sql_query("VACUUM").execute(conn)?;
+            Ok(())
+        })
+    }
 }
