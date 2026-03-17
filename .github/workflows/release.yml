@@ -34,7 +34,7 @@ jobs:
           mv target/release/lister${{ matrix.ext }} \
              lister-${{ matrix.target }}${{ matrix.ext }}
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2.5.0
         with:
           files: lister-*
         env:
