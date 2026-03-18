@@ -33,14 +33,20 @@ impl CategoryComboBox {
         .into()
     }
 
-    pub fn find_categories_for_drive(query_use_case: Arc<FileQueryService>, drive: String) -> Task<CategoryComboBoxMessage> {
-        Task::perform(async move {
-            query_use_case
-                .list_category_names_for_drive(&drive)
-                .unwrap_or_else(|err| {
-                    popup_error(err);
-                    vec![]
-                })
-        }, CategoryComboBoxMessage::CategoriesFetched)
+    pub fn find_categories_for_drive(
+        query_use_case: Arc<FileQueryService>,
+        drive: String,
+    ) -> Task<CategoryComboBoxMessage> {
+        Task::perform(
+            async move {
+                query_use_case
+                    .list_category_names_for_drive(&drive)
+                    .unwrap_or_else(|err| {
+                        popup_error(err);
+                        vec![]
+                    })
+            },
+            CategoryComboBoxMessage::CategoriesFetched,
+        )
     }
 }

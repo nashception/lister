@@ -21,6 +21,13 @@ enum Page {
     Write(WritePage),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageKind {
+    Delete,
+    Read,
+    Write,
+}
+
 pub struct ListerApp {
     service: ListerAppService,
     current_language: Language,
@@ -87,11 +94,50 @@ impl ListerApp {
     pub fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
         match message {
             AppMessage::ChangeLanguage(language) => self.change_language(language),
-            AppMessage::ChangePage => match self.current_page {
-                Page::Delete(_) => self.update(AppMessage::GoToRead),
-                Page::Read(_) => self.update(AppMessage::GoToWrite),
-                Page::Write(_) => self.update(AppMessage::GoToDelete),
-            },
+            AppMessage::ChangePage(page_kind) => {
+                let already_on_page = matches!(
+                    (&self.current_page, page_kind),
+                    (Page::Delete(_), PageKind::Delete)
+                        | (Page::Read(_), PageKind::Read)
+                        | (Page::Write(_), PageKind::Write)
+                );
+
+                if already_on_page {
+                    return Task::none();
+                }
+                match page_kind {
+                    PageKind::Delete => {
+                        let (page, task) = DeletePage::new(
+                            self.service.delete_use_case.clone(),
+                            self.service.query_use_case.clone(),
+                        );
+                        self.current_page = Page::Delete(page);
+                        task.map(AppMessage::Delete)
+                    }
+                    PageKind::Read => {
+                        let (page, task) = ReadPage::new(self.service.query_use_case.clone());
+                        self.current_page = Page::Read(page);
+                        task.map(AppMessage::Read)
+                    }
+                    PageKind::Write => {
+                        let (page, task) = WritePage::new(
+                            self.service.indexing_use_case.clone(),
+                            self.service.directory_picker.clone(),
+                        );
+                        self.current_page = Page::Write(page);
+                        task.map(AppMessage::Write)
+                    }
+                }
+            }
+            AppMessage::ChangePageNext => {
+                let next = match self.current_page {
+                    Page::Delete(_) => PageKind::Read,
+                    Page::Read(_) => PageKind::Write,
+                    Page::Write(_) => PageKind::Delete,
+                };
+
+                self.update(AppMessage::ChangePage(next))
+            }
             AppMessage::CompactDatabase => {
                 let query_use_case = self.service.query_use_case.clone();
                 Task::perform(
@@ -115,39 +161,6 @@ impl ListerApp {
                     page.update(msg).map(AppMessage::Delete)
                 } else {
                     Task::none()
-                }
-            }
-            AppMessage::GoToDelete => {
-                if matches!(self.current_page, Page::Delete(_)) {
-                    Task::none()
-                } else {
-                    let (delete_page, task) = DeletePage::new(
-                        self.service.delete_use_case.clone(),
-                        self.service.query_use_case.clone(),
-                    );
-                    self.current_page = Page::Delete(delete_page);
-                    task.map(AppMessage::Delete)
-                }
-            }
-            AppMessage::GoToRead => {
-                if matches!(self.current_page, Page::Read(_)) {
-                    Task::none()
-                } else {
-                    let (read_page, task) = ReadPage::new(self.service.query_use_case.clone());
-                    self.current_page = Page::Read(read_page);
-                    task.map(AppMessage::Read)
-                }
-            }
-            AppMessage::GoToWrite => {
-                if matches!(self.current_page, Page::Write(_)) {
-                    Task::none()
-                } else {
-                    let (write_page, task) = WritePage::new(
-                        self.service.indexing_use_case.clone(),
-                        self.service.directory_picker.clone(),
-                    );
-                    self.current_page = Page::Write(write_page);
-                    task.map(AppMessage::Write)
                 }
             }
             AppMessage::LanguageChanged(language, translations) => {
@@ -187,7 +200,7 @@ impl ListerApp {
                 };
 
                 match (key, modifiers) {
-                    (Named::Tab, Modifiers::CTRL) => Some(AppMessage::ChangePage),
+                    (Named::Tab, Modifiers::CTRL) => Some(AppMessage::ChangePageNext),
                     (Named::Tab, _) => Some(AppMessage::TabPressed {
                         shift: modifiers.shift(),
                     }),
@@ -214,7 +227,7 @@ impl ListerApp {
     fn nav_bar(&'_ self) -> Element<'_, AppMessage> {
         row![
             button(text(tr!(&self.translations, "read_page")).align_x(Alignment::Center))
-                .on_press(AppMessage::GoToRead)
+                .on_press(AppMessage::ChangePage(PageKind::Read))
                 .style(if matches!(&self.current_page, Page::Read(_)) {
                     button::primary
                 } else {
@@ -222,7 +235,7 @@ impl ListerApp {
                 })
                 .width(Length::Fill),
             button(text(tr!(&self.translations, "write_page")).align_x(Alignment::Center))
-                .on_press(AppMessage::GoToWrite)
+                .on_press(AppMessage::ChangePage(PageKind::Write))
                 .style(if matches!(&self.current_page, Page::Write(_)) {
                     button::primary
                 } else {
@@ -230,7 +243,7 @@ impl ListerApp {
                 })
                 .width(Length::Fill),
             button(text(tr!(&self.translations, "delete_page")).align_x(Alignment::Center))
-                .on_press(AppMessage::GoToDelete)
+                .on_press(AppMessage::ChangePage(PageKind::Delete))
                 .style(if matches!(&self.current_page, Page::Delete(_)) {
                     button::primary
                 } else {

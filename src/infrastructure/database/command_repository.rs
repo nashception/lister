@@ -1,4 +1,5 @@
 use crate::domain::model::file_entry::FileEntry;
+use crate::infrastructure::database::binary_format::UuidSqlite;
 use crate::infrastructure::database::conversion::ToI64;
 use crate::infrastructure::database::entities::{
     NewDriveEntryDto, NewFileCategoryDto, NewFileEntryDto,
@@ -12,7 +13,6 @@ use diesel::{QueryDsl, RunQueryDsl, SqliteConnection};
 use rayon::prelude::*;
 use std::sync::Arc;
 use uuid::Uuid;
-use crate::infrastructure::database::binary_format::UuidSqlite;
 
 /// Repository for write operations on files, drives, and categories.
 pub struct CommandRepository {
@@ -121,7 +121,10 @@ impl CommandRepository {
         })
     }
 
-    fn save_category(category: &str, conn: &mut SqliteConnection) -> Result<UuidSqlite, RepositoryError> {
+    fn save_category(
+        category: &str,
+        conn: &mut SqliteConnection,
+    ) -> Result<UuidSqlite, RepositoryError> {
         if let Ok(existing_id) = file_categories::table
             .filter(file_categories::name.eq(category))
             .select(file_categories::id)
