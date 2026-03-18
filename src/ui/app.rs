@@ -108,7 +108,7 @@ impl ListerApp {
                     Page::Write(_) => PageKind::Delete,
                 };
 
-                self.update(AppMessage::ChangePage(next))
+                self.change_page(next)
             }
             AppMessage::CompactDatabase => {
                 let query_use_case = self.service.query_use_case.clone();

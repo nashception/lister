@@ -77,11 +77,11 @@ impl ReadPage {
 
     pub fn update(&mut self, message: ReadMessage) -> Task<ReadMessage> {
         match message {
-            ReadMessage::ArrowDownPressed { shift } => self.file_list.scroll(30., shift),
+            ReadMessage::ArrowDownPressed { shift } => self.arrow_done_pressed(shift),
             ReadMessage::ArrowLeftPressed { shift } => self.handle_left(shift),
             ReadMessage::ArrowNavigationReleased => self.load_current_page(),
             ReadMessage::ArrowRightPressed { shift } => self.handle_right(shift),
-            ReadMessage::ArrowUpPressed { shift } => self.file_list.scroll(-30., shift),
+            ReadMessage::ArrowUpPressed { shift } => self.arrow_up_pressed(shift),
             ReadMessage::ContentChanged(content) => {
                 self.search.query = content;
                 Task::none()
@@ -104,15 +104,13 @@ impl ReadPage {
                 self.navigate_to_page(self.pagination.total_pages().saturating_sub(1))
             }
             ReadMessage::NextPage => self.next_page(),
-            ReadMessage::PageDownPressed => {
-                self.update(ReadMessage::ArrowDownPressed { shift: true })
-            }
+            ReadMessage::PageDownPressed => self.arrow_done_pressed(true),
             ReadMessage::PageInputChanged(page_number) => {
                 self.pagination.page_input_value = page_number;
                 Task::none()
             }
             ReadMessage::PageInputSubmit => self.process_page_input(),
-            ReadMessage::PageUpPressed => self.update(ReadMessage::ArrowUpPressed { shift: true }),
+            ReadMessage::PageUpPressed => self.arrow_up_pressed(true),
             ReadMessage::PrevPage => self.previous_page(),
             ReadMessage::SearchClear => self.clear_search(),
             ReadMessage::SearchSubmit => self.process_new_search(),
@@ -363,6 +361,14 @@ impl ReadPage {
     fn show_page(&mut self, items: Vec<FileWithMetadata>) -> Task<ReadMessage> {
         self.file_list.set_files(items);
         self.file_list.snap_to_top()
+    }
+
+    fn arrow_done_pressed(&self, shift: bool) -> Task<ReadMessage> {
+        self.file_list.scroll(30., shift)
+    }
+
+    fn arrow_up_pressed(&self, shift: bool) -> Task<ReadMessage> {
+        self.file_list.scroll(-30., shift)
     }
 
     fn handle_left(&mut self, shift: bool) -> Task<ReadMessage> {
