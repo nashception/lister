@@ -56,10 +56,13 @@ impl WritePage {
         let action_section = self.action_section(translations);
         let status_section = self.indexing_state(translations);
 
-        column![form_section, action_section, status_section]
-            .spacing(20)
-            .padding(20)
-            .into()
+        container(
+            column![form_section, action_section, status_section]
+                .spacing(20)
+                .padding(20),
+        )
+        .height(Length::Fill)
+        .into()
     }
 
     pub fn update(&mut self, message: WriteMessage) -> Task<WriteMessage> {
