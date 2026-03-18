@@ -12,6 +12,7 @@ diesel_migrations = { version = "2.3", default-features = false }
 
 # GUI
 iced_aw = { version = "0.13", features = ["spinner"], default-features = false }
+iced_toaster = "0.2.0"
 
 # File system
 sysinfo = { version = "0.38", features = ["disk"], default-features = false }

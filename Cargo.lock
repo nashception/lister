@@ -1749,6 +1749,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced_toaster"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34d3b297c2cbf497a70a7066b834784273c040f60f73b670d9728a1e2ab9675f"
+dependencies = [
+ "iced_widget",
+]
+
+[[package]]
 name = "iced_wgpu"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2213,6 +2222,7 @@ dependencies = [
  "humansize",
  "iced",
  "iced_aw",
+ "iced_toaster",
  "jwalk",
  "libsqlite3-sys",
  "rayon",

@@ -2,10 +2,11 @@ use crate::domain::model::language::Language;
 use crate::tr;
 use crate::ui::app_factory::ListerAppService;
 use crate::ui::messages::app_message::AppMessage;
+use crate::ui::messages::toaster_message::ToasterMessage;
 use crate::ui::pages::delete_page::DeletePage;
 use crate::ui::pages::read_page::ReadPage;
 use crate::ui::pages::write_page::WritePage;
-use crate::utils::dialogs::{popup_error, popup_info};
+use crate::utils::dialogs::popup_error;
 use humansize::{format_size, DECIMAL};
 use iced::keyboard::key::Named;
 use iced::keyboard::Modifiers;
@@ -13,6 +14,7 @@ use iced::widget::operation::{focus_next, focus_previous};
 use iced::widget::{button, column, row, text, Space};
 use iced::window::{icon, Icon, Settings};
 use iced::{event, keyboard, Alignment, Element, Event, Length, Subscription, Task};
+use iced_toaster::{info_toast, toaster, Toaster};
 use std::collections::HashMap;
 
 enum Page {
@@ -33,6 +35,7 @@ pub struct ListerApp {
     current_language: Language,
     translations: HashMap<String, String>,
     current_page: Page,
+    toaster: Toaster<AppMessage>,
 }
 
 impl ListerApp {
@@ -47,6 +50,7 @@ impl ListerApp {
                 current_language,
                 translations,
                 current_page: Page::Read(read_page),
+                toaster: toaster(),
             },
             task.map(AppMessage::Read),
         )
@@ -86,49 +90,17 @@ impl ListerApp {
             Page::Write(page) => page.view(&self.translations).map(AppMessage::Write),
         };
 
-        column![toolbar, Space::new().height(10), nav_bar, content]
-            .padding(20)
-            .into()
+        self.toaster.view(
+            column![toolbar, Space::new().height(10), nav_bar, content].padding(20),
+            |toast_id| AppMessage::ToastMessage(ToasterMessage::DismissToast(toast_id)),
+            |toast_id, bool| AppMessage::ToastMessage(ToasterMessage::HoverToast(toast_id, bool)),
+        )
     }
 
     pub fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
         match message {
             AppMessage::ChangeLanguage(language) => self.change_language(language),
-            AppMessage::ChangePage(page_kind) => {
-                let already_on_page = matches!(
-                    (&self.current_page, page_kind),
-                    (Page::Delete(_), PageKind::Delete)
-                        | (Page::Read(_), PageKind::Read)
-                        | (Page::Write(_), PageKind::Write)
-                );
-
-                if already_on_page {
-                    return Task::none();
-                }
-                match page_kind {
-                    PageKind::Delete => {
-                        let (page, task) = DeletePage::new(
-                            self.service.delete_use_case.clone(),
-                            self.service.query_use_case.clone(),
-                        );
-                        self.current_page = Page::Delete(page);
-                        task.map(AppMessage::Delete)
-                    }
-                    PageKind::Read => {
-                        let (page, task) = ReadPage::new(self.service.query_use_case.clone());
-                        self.current_page = Page::Read(page);
-                        task.map(AppMessage::Read)
-                    }
-                    PageKind::Write => {
-                        let (page, task) = WritePage::new(
-                            self.service.indexing_use_case.clone(),
-                            self.service.directory_picker.clone(),
-                        );
-                        self.current_page = Page::Write(page);
-                        task.map(AppMessage::Write)
-                    }
-                }
-            }
+            AppMessage::ChangePage(page_kind) => self.change_page(page_kind),
             AppMessage::ChangePageNext => {
                 let next = match self.current_page {
                     Page::Delete(_) => PageKind::Read,
@@ -151,10 +123,15 @@ impl ListerApp {
                 )
             }
             AppMessage::DatabaseCompacted(freed_space) => {
-                popup_info(
-                    tr!(&self.translations, "compacted", "freed_space" => &format_size(freed_space, DECIMAL)),
-                );
-                Task::none()
+                let translations = self.translations.clone();
+                Task::perform(
+                    async move {
+                        info_toast!(
+                            tr!(&translations, "compacted", "freed_space" => &format_size(freed_space, DECIMAL))
+                        )
+                    },
+                    |toast| AppMessage::ToastMessage(ToasterMessage::PushToast(toast)),
+                )
             }
             AppMessage::Delete(msg) => {
                 if let Page::Delete(page) = &mut self.current_page {
@@ -182,6 +159,7 @@ impl ListerApp {
                     focus_next()
                 }
             }
+            AppMessage::ToastMessage(msg) => self.toast_message(msg),
             AppMessage::Write(msg) => {
                 if let Page::Write(page) = &mut self.current_page {
                     page.update(msg).map(AppMessage::Write)
@@ -210,12 +188,23 @@ impl ListerApp {
             _ => None,
         });
 
+        let toaster_subscription = if self.toaster.is_empty() {
+            Subscription::none()
+        } else {
+            iced::time::every(std::time::Duration::from_secs(5))
+                .map(|_| AppMessage::ToastMessage(ToasterMessage::Tick))
+        };
+
         let page_subscription = match &self.current_page {
             Page::Delete(_) | Page::Write(_) => Subscription::none(),
             Page::Read(_) => ReadPage::subscription().map(AppMessage::Read),
         };
 
-        Subscription::batch(vec![app_subscription, page_subscription])
+        Subscription::batch(vec![
+            app_subscription,
+            toaster_subscription,
+            page_subscription,
+        ])
     }
 
     fn lister_icon() -> Option<Icon> {
@@ -279,5 +268,59 @@ impl ListerApp {
             },
             |(language, translations)| AppMessage::LanguageChanged(language, translations),
         )
+    }
+
+    fn change_page(&mut self, page_kind: PageKind) -> Task<AppMessage> {
+        let already_on_page = matches!(
+            (&self.current_page, page_kind),
+            (Page::Delete(_), PageKind::Delete)
+                | (Page::Read(_), PageKind::Read)
+                | (Page::Write(_), PageKind::Write)
+        );
+
+        if already_on_page {
+            return Task::none();
+        }
+        match page_kind {
+            PageKind::Delete => {
+                let (page, task) = DeletePage::new(
+                    self.service.delete_use_case.clone(),
+                    self.service.query_use_case.clone(),
+                );
+                self.current_page = Page::Delete(page);
+                task.map(AppMessage::Delete)
+            }
+            PageKind::Read => {
+                let (page, task) = ReadPage::new(self.service.query_use_case.clone());
+                self.current_page = Page::Read(page);
+                task.map(AppMessage::Read)
+            }
+            PageKind::Write => {
+                let (page, task) = WritePage::new(
+                    self.service.indexing_use_case.clone(),
+                    self.service.directory_picker.clone(),
+                );
+                self.current_page = Page::Write(page);
+                task.map(AppMessage::Write)
+            }
+        }
+    }
+
+    fn toast_message(&mut self, msg: ToasterMessage) -> Task<AppMessage> {
+        match msg {
+            ToasterMessage::PushToast(toast) => {
+                self.toaster.push(toast);
+            }
+            ToasterMessage::DismissToast(id) => {
+                self.toaster.dismiss(id);
+            }
+            ToasterMessage::HoverToast(id, hovered) => {
+                self.toaster.set_hovered(id, hovered);
+            }
+            ToasterMessage::Tick => {
+                self.toaster.dismiss_expired();
+            }
+        }
+        Task::none()
     }
 }
