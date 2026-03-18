@@ -166,6 +166,7 @@ impl QueryRepository {
     pub fn compact(&self) -> Result<(), RepositoryError> {
         self.pool.execute_db_operation(|conn| {
             diesel::sql_query("VACUUM").execute(conn)?;
+            diesel::sql_query("PRAGMA shrink_memory;").execute(conn)?;
             Ok(())
         })
     }
