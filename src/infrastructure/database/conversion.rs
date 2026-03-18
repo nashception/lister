@@ -1,7 +1,7 @@
 use crate::domain::model::file_entry::{FileEntry, FileWithMetadata};
+use crate::infrastructure::database::binary_format::UuidSqlite;
 use crate::infrastructure::database::entities::{FileWithMetadataDto, NewFileEntryDto};
 use uuid::Uuid;
-use crate::infrastructure::database::binary_format::UuidSqlite;
 
 pub trait ToI64 {
     fn to_i64_or_zero(self) -> i64;

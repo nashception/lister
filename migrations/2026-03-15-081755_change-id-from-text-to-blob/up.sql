@@ -1,42 +1,49 @@
-PRAGMA foreign_keys=OFF;
+PRAGMA foreign_keys= OFF;
 
 -- Step 1: Temporary mapping tables
-CREATE TEMPORARY TABLE category_uuid_text_to_blob_map (
+CREATE TEMPORARY TABLE category_uuid_text_to_blob_map
+(
     old_id TEXT PRIMARY KEY,
     new_id BLOB NOT NULL
 );
 
-CREATE TEMPORARY TABLE drive_uuid_text_to_blob_map (
+CREATE TEMPORARY TABLE drive_uuid_text_to_blob_map
+(
     old_id TEXT PRIMARY KEY,
     new_id BLOB NOT NULL
 );
 
 -- Step 2: Generate 16-byte UUIDs for existing records
 INSERT INTO category_uuid_text_to_blob_map (old_id, new_id)
-SELECT id, randomblob(16) FROM file_categories;
+SELECT id, randomblob(16)
+FROM file_categories;
 
 INSERT INTO drive_uuid_text_to_blob_map (old_id, new_id)
-SELECT id, randomblob(16) FROM drive_entries;
+SELECT id, randomblob(16)
+FROM drive_entries;
 
 -- Step 3: Create new tables with BLOB IDs
-CREATE TABLE file_categories_new (
-                                     id   BLOB PRIMARY KEY NOT NULL,
-                                     name TEXT NOT NULL
+CREATE TABLE file_categories_new
+(
+    id   BLOB PRIMARY KEY NOT NULL,
+    name TEXT             NOT NULL
 );
 
-CREATE TABLE drive_entries_new (
-                                   id              BLOB PRIMARY KEY NOT NULL,
-                                   category_id     BLOB NOT NULL REFERENCES file_categories_new(id),
-                                   name            TEXT NOT NULL,
-                                   available_space BIGINT NOT NULL DEFAULT 0,
-                                   insertion_time  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE drive_entries_new
+(
+    id              BLOB PRIMARY KEY NOT NULL,
+    category_id     BLOB             NOT NULL REFERENCES file_categories_new (id),
+    name            TEXT             NOT NULL,
+    available_space BIGINT           NOT NULL DEFAULT 0,
+    insertion_time  TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE file_entries_new (
-                                  id       BLOB PRIMARY KEY NOT NULL,
-                                  drive_id BLOB NOT NULL REFERENCES drive_entries_new(id) ON DELETE CASCADE,
-                                  path     TEXT COLLATE NOCASE NOT NULL,
-                                  weight   BIGINT NOT NULL
+CREATE TABLE file_entries_new
+(
+    id       BLOB PRIMARY KEY    NOT NULL,
+    drive_id BLOB                NOT NULL REFERENCES drive_entries_new (id) ON DELETE CASCADE,
+    path     TEXT COLLATE NOCASE NOT NULL,
+    weight   BIGINT              NOT NULL
 );
 
 -- Step 4: Copy data using the new BLOB UUIDs
@@ -61,11 +68,14 @@ DROP TABLE file_entries;
 DROP TABLE drive_entries;
 DROP TABLE file_categories;
 
-ALTER TABLE file_categories_new RENAME TO file_categories;
-ALTER TABLE drive_entries_new RENAME TO drive_entries;
-ALTER TABLE file_entries_new RENAME TO file_entries;
+ALTER TABLE file_categories_new
+    RENAME TO file_categories;
+ALTER TABLE drive_entries_new
+    RENAME TO drive_entries;
+ALTER TABLE file_entries_new
+    RENAME TO file_entries;
 
-PRAGMA foreign_keys=ON;
+PRAGMA foreign_keys= ON;
 
 -- Critical indexes for JOIN performance
 CREATE INDEX IF NOT EXISTS idx_drive_entries_category_id ON drive_entries (category_id);

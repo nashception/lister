@@ -1,4 +1,5 @@
-PRAGMA foreign_keys= OFF;
+PRAGMA
+foreign_keys= OFF;
 
 -- Create new table with cascade
 CREATE TABLE file_entries_new
@@ -23,4 +24,5 @@ DROP TABLE file_entries;
 ALTER TABLE file_entries_new
     RENAME TO file_entries;
 
-PRAGMA foreign_keys= ON;
+PRAGMA
+foreign_keys= ON;
