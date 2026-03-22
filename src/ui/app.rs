@@ -296,10 +296,7 @@ impl ListerApp {
                 task.map(AppMessage::Read)
             }
             PageKind::Write => {
-                let (page, task) = WritePage::new(
-                    self.service.indexing_use_case.clone(),
-                    self.service.directory_picker.clone(),
-                );
+                let (page, task) = WritePage::new(self.service.indexing_use_case.clone());
                 self.current_page = Page::Write(page);
                 task.map(AppMessage::Write)
             }

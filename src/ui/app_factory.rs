@@ -7,7 +7,6 @@ use crate::infrastructure::database::command_repository::CommandRepository;
 use crate::infrastructure::database::language_repository::LanguageRepository;
 use crate::infrastructure::database::pool::SqliteRepositoryPool;
 use crate::infrastructure::database::query_repository::QueryRepository;
-use crate::infrastructure::filesystem::native_directory_picker::NativeDirectoryPicker;
 use crate::infrastructure::i18n::json_translation_loader::JsonTranslationLoader;
 use crate::utils::dialogs::popup_error_and_exit;
 use std::collections::HashMap;
@@ -18,14 +17,11 @@ pub struct ListerAppService {
     pub indexing_use_case: Arc<FileIndexingService>,
     pub delete_use_case: Arc<DeleteService>,
     pub language_use_case: Arc<LanguageService>,
-    pub directory_picker: Arc<NativeDirectoryPicker>,
 }
 
 impl ListerAppService {
     #[must_use]
     pub fn create() -> Self {
-        let directory_picker = Arc::new(NativeDirectoryPicker);
-
         let pool =
             SqliteRepositoryPool::new("app.db").unwrap_or_else(|error| popup_error_and_exit(error));
 
@@ -46,7 +42,6 @@ impl ListerAppService {
             indexing_use_case: indexing_service,
             delete_use_case: delete_service,
             language_use_case: language_service,
-            directory_picker,
         }
     }
 

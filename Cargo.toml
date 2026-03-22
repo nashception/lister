@@ -1,6 +1,6 @@
 [package]
 name = "lister"
-version = "1.4.2"
+version = "1.4.3"
 edition = "2024"
 publish = false
 
@@ -11,8 +11,10 @@ diesel = { version = "2.3", features = ["chrono", "r2d2", "returning_clauses_for
 diesel_migrations = { version = "2.3", default-features = false }
 
 # GUI
+iced = { version = "0.14", features = ["advanced", "image", "tokio", "wgpu"], default-features = false }
 iced_aw = { version = "0.13", features = ["spinner"], default-features = false }
 iced_toaster = "0.2.0"
+rfd = { version = "0.17", default-features = false }
 
 # File system
 sysinfo = { version = "0.38", features = ["disk"], default-features = false }
@@ -33,17 +35,6 @@ self_update = { version = "0.43", features = ["rustls", "reqwest"], default-feat
 [target.'cfg(target_os = "linux")'.dependencies]
 iced = { version = "0.14", features = ["advanced", "image", "tokio", "wayland", "wgpu"], default-features = false }
 rfd = { version = "0.17", features = ["xdg-portal"], default-features = false }
-tokio = { version = "1.47", features = ["rt-multi-thread"], default-features = false }
-
-# Windows-specific features
-[target.'cfg(target_os = "windows")'.dependencies]
-iced = { version = "0.14", features = ["advanced", "image", "tokio", "wgpu"], default-features = false }
-rfd = { version = "0.17", default-features = false }
-
-# macOS-specific features
-[target.'cfg(target_os = "macos")'.dependencies]
-iced = { version = "0.14", features = ["advanced", "image", "tokio", "wgpu"], default-features = false }
-rfd = { version = "0.17", default-features = false }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 libsqlite3-sys = { version = "0.36", features = ["bundled"], default-features = false }

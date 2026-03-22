@@ -14,7 +14,9 @@ pub fn directory_data(directory: &Path) -> DirectoryData {
         .find(|disk| directory.starts_with(disk.mount_point()))
         .unwrap_or_else(|| {
             popup_error_and_exit(format!(
-                "Cannot find the disk for directory {}", directory.display()))
+                "Cannot find the disk for directory {}",
+                directory.display()
+            ))
         });
 
     DirectoryData {

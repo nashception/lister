@@ -1,6 +1,6 @@
 use crate::application::file_indexing_service::FileIndexingService;
 use crate::domain::model::file_entry::FileEntry;
-use crate::infrastructure::filesystem::native_directory_picker::NativeDirectoryPicker;
+use crate::infrastructure::filesystem::directory::directory_data;
 use crate::tr;
 use crate::ui::components::write::indexing::IndexingState;
 use crate::ui::messages::write_message::WriteMessage;
@@ -28,19 +28,14 @@ impl WriteData {
 
 pub struct WritePage {
     indexing_use_case: Arc<FileIndexingService>,
-    directory_picker: Arc<NativeDirectoryPicker>,
     state: IndexingState,
     write_data: WriteData,
 }
 
 impl WritePage {
-    pub fn new(
-        indexing_use_case: Arc<FileIndexingService>,
-        directory_picker: Arc<NativeDirectoryPicker>,
-    ) -> (Self, Task<WriteMessage>) {
+    pub fn new(indexing_use_case: Arc<FileIndexingService>) -> (Self, Task<WriteMessage>) {
         let page = Self {
             indexing_use_case,
-            directory_picker,
             state: IndexingState::Ready,
             write_data: WriteData::default(),
         };
@@ -72,13 +67,15 @@ impl WritePage {
                 Task::none()
             }
             WriteMessage::DatabaseCleaned => self.start_indexing(),
-            WriteMessage::DirectoryPressed { dialog_title } => {
-                let picker = self.directory_picker.clone();
-                Task::perform(
-                    async move { picker.pick_directory(&dialog_title) },
-                    WriteMessage::DirectoryChanged,
-                )
-            }
+            WriteMessage::DirectoryPressed { dialog_title } => Task::perform(
+                async move {
+                    rfd::FileDialog::new()
+                        .set_title(&dialog_title)
+                        .pick_folder()
+                        .map(|handle| directory_data(handle.as_path()))
+                },
+                WriteMessage::DirectoryChanged,
+            ),
             WriteMessage::DirectoryChanged(selected_data) => {
                 if let Some(data) = selected_data {
                     self.write_data = WriteData {
