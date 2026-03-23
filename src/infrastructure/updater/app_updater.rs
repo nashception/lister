@@ -50,13 +50,11 @@ fn try_update() -> Result<String, UpdateError> {
         .build()?
         .update()?;
 
-    let new_version = if status.updated() {
+    Ok(if status.updated() {
         String::from(status.version())
     } else {
         String::new()
-    };
-
-    Ok(new_version)
+    })
 }
 
 fn restart(exe_path: PathBuf) -> Result<(), UpdateError> {

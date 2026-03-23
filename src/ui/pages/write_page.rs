@@ -1,5 +1,6 @@
-use crate::application::file_indexing_service::FileIndexingService;
+use crate::application::directory_scanner;
 use crate::domain::model::file_entry::FileEntry;
+use crate::infrastructure::database::repository::ListerRepository;
 use crate::infrastructure::filesystem::directory::directory_data;
 use crate::tr;
 use crate::ui::components::write::indexing::IndexingState;
@@ -27,15 +28,15 @@ impl WriteData {
 }
 
 pub struct WritePage {
-    indexing_use_case: Arc<FileIndexingService>,
+    command_repository: Arc<ListerRepository>,
     state: IndexingState,
     write_data: WriteData,
 }
 
 impl WritePage {
-    pub fn new(indexing_use_case: Arc<FileIndexingService>) -> (Self, Task<WriteMessage>) {
+    pub fn new(command_repository: Arc<ListerRepository>) -> (Self, Task<WriteMessage>) {
         let page = Self {
-            indexing_use_case,
+            command_repository,
             state: IndexingState::Ready,
             write_data: WriteData::default(),
         };
@@ -282,7 +283,7 @@ impl WritePage {
         }
         self.state = IndexingState::CleaningDatabase;
 
-        let indexing_use_case = self.indexing_use_case.clone();
+        let indexing_use_case = self.command_repository.clone();
         let category = self.write_data.category.clone();
         let drive = self.write_data.drive.clone();
 
@@ -302,19 +303,16 @@ impl WritePage {
         }
         self.state = IndexingState::Scanning;
 
-        let indexing_use_case = self.indexing_use_case.clone();
         self.write_data
             .directory
             .clone()
             .map_or_else(Task::none, |directory| {
                 Task::perform(
                     async move {
-                        indexing_use_case
-                            .scan_directory(&directory)
-                            .unwrap_or_else(|error| {
-                                popup_error(error);
-                                Vec::new()
-                            })
+                        directory_scanner::scan_directory(&directory).unwrap_or_else(|error| {
+                            popup_error(error);
+                            vec![]
+                        })
                     },
                     WriteMessage::ScanDirectoryFinished,
                 )
@@ -327,15 +325,15 @@ impl WritePage {
         }
         self.state = IndexingState::Saving;
 
-        let indexing_use_case = self.indexing_use_case.clone();
+        let command_repository = self.command_repository.clone();
         let category = self.write_data.category.clone();
         let drive = self.write_data.drive.clone();
         let drive_available_space = self.write_data.drive_available_space;
 
         Task::perform(
             async move {
-                indexing_use_case
-                    .insert_in_database(&category, &drive, drive_available_space, &files)
+                command_repository
+                    .save(&category, &drive, drive_available_space, &files)
                     .unwrap_or(0)
             },
             WriteMessage::InsertInDatabaseFinished,

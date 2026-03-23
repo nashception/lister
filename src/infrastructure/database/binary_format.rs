@@ -11,6 +11,12 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Debug)]
 pub struct UuidSqlite(pub Uuid);
 
+impl UuidSqlite {
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
 impl ToSql<Binary, Sqlite> for UuidSqlite {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Sqlite>) -> serialize::Result {
         <[u8] as ToSql<Binary, Sqlite>>::to_sql(self.0.as_bytes(), out)

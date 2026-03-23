@@ -1,4 +1,3 @@
-use crate::domain::errors::domain_error::DomainError;
 use crate::domain::model::file_entry::FileEntry;
 use jwalk::{DirEntry, WalkDir};
 use std::path::{Path, StripPrefixError};
@@ -9,12 +8,6 @@ pub enum DirectoryScannerError {
     RelativePath(#[from] StripPrefixError),
     #[error("File metadata error: {0}")]
     FileMetadata(#[from] jwalk::Error),
-}
-
-impl From<DirectoryScannerError> for DomainError {
-    fn from(e: DirectoryScannerError) -> Self {
-        Self::DirectoryScannerError(e.to_string())
-    }
 }
 
 /// Recursively scans a directory and returns a list of [`FileEntry`] values.
@@ -30,9 +23,7 @@ impl From<DirectoryScannerError> for DomainError {
 /// - A [`FileMetadata`](DirectoryScannerError::FileMetadata) error occurs when retrieving
 ///   file metadata (e.g., file size).
 pub fn scan_directory(directory: &Path) -> Result<Vec<FileEntry>, DirectoryScannerError> {
-    let directory = directory.to_path_buf();
-
-    WalkDir::new(&directory)
+    WalkDir::new(directory)
         .skip_hidden(false)
         .sort(true)
         .into_iter()
@@ -46,16 +37,14 @@ fn extract_file_info(
     base_directory: &Path,
     entry: &DirEntry<((), ())>,
 ) -> Result<FileEntry, DirectoryScannerError> {
-    let metadata = entry.metadata()?;
     Ok(FileEntry {
         path: relative_path(base_directory, &entry.path())?,
-        size_bytes: metadata.len(),
+        size_bytes: entry.metadata()?.len(),
     })
 }
 
 fn relative_path(base_directory: &Path, file_path: &Path) -> Result<String, DirectoryScannerError> {
-    let relative_path = file_path
+    Ok(file_path
         .strip_prefix(base_directory)
-        .map(|p| p.to_string_lossy().into_owned())?;
-    Ok(relative_path)
+        .map(|p| p.to_string_lossy().into_owned())?)
 }

@@ -1,7 +1,8 @@
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum Language {
+    #[default]
     English,
     French,
 }
