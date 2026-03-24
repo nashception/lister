@@ -1,37 +1,31 @@
-use crate::application::delete_service::DeleteService;
-use crate::application::file_query_service::FileQueryService;
+use crate::infrastructure::database::repository::ListerRepository;
 use crate::tr;
-use crate::ui::components::delete::category_combo_box::CategoryComboBox;
 use crate::ui::components::drive_combo_box::DriveComboBox;
-use crate::ui::messages::category_combo_box::CategoryComboBoxMessage;
 use crate::ui::messages::delete_message::DeleteMessage;
 use crate::ui::messages::drive_combo_box::DriveComboBoxMessage;
 use crate::utils::dialogs::popup_error;
-use iced::widget::{button, column, container, row, rule, text};
+use iced::widget::{button, column, container, pick_list, row, rule, text};
 use iced::{Element, Length, Task};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct DeletePage {
-    delete_use_case: Arc<DeleteService>,
-    query_use_case: Arc<FileQueryService>,
-    category_combo_box: CategoryComboBox,
+    repository: Arc<ListerRepository>,
     drive_combo_box: DriveComboBox,
+    categories_per_drive: Vec<String>,
+    selected_category: Option<String>,
     is_deleted: bool,
 }
 
 impl DeletePage {
-    pub fn new(
-        delete_use_case: Arc<DeleteService>,
-        query_use_case: Arc<FileQueryService>,
-    ) -> (Self, Task<DeleteMessage>) {
-        let (drive_combo_box, combo_box_task) = DriveComboBox::new(query_use_case.clone());
+    pub fn new(repository: Arc<ListerRepository>) -> (Self, Task<DeleteMessage>) {
+        let (drive_combo_box, combo_box_task) = DriveComboBox::new(repository.clone());
         (
             Self {
-                delete_use_case,
-                query_use_case,
-                category_combo_box: CategoryComboBox::new(),
+                repository,
                 drive_combo_box,
+                categories_per_drive: vec![],
+                selected_category: None,
                 is_deleted: false,
             },
             combo_box_task.map(DeleteMessage::DriveComboBox),
@@ -44,14 +38,14 @@ impl DeletePage {
 
     pub fn view(&'_ self, translations: &HashMap<String, String>) -> Element<'_, DeleteMessage> {
         let drive_combo_box = self.drive_combo_box.view(translations);
-        let category_combo_box = self.category_combo_box.view(translations);
+        let category_combo_box = self.category_combo_box(translations);
         let action_section = self.action_section(translations);
 
         container(
             column![
                 row![
                     drive_combo_box.map(DeleteMessage::DriveComboBox),
-                    category_combo_box.map(DeleteMessage::CategoryComboBox)
+                    category_combo_box
                 ]
                 .spacing(20),
                 action_section
@@ -65,16 +59,14 @@ impl DeletePage {
 
     pub fn update(&mut self, message: DeleteMessage) -> Task<DeleteMessage> {
         match message {
-            DeleteMessage::CategoryComboBox(msg) => match msg {
-                CategoryComboBoxMessage::CategoriesFetched(categories) => {
-                    self.category_combo_box.categories_per_drive = categories;
-                    Task::none()
-                }
-                CategoryComboBoxMessage::CategorySelected(category) => {
-                    self.category_combo_box.selected_category = Some(category);
-                    Task::none()
-                }
-            },
+            DeleteMessage::CategoriesFetched(categories) => {
+                self.categories_per_drive = categories;
+                Task::none()
+            }
+            DeleteMessage::CategorySelected(category) => {
+                self.selected_category = Some(category);
+                Task::none()
+            }
             DeleteMessage::DriveComboBox(msg) => match msg {
                 DriveComboBoxMessage::DrivesFetched(drives) => {
                     self.drive_combo_box.drives = drives;
@@ -82,15 +74,15 @@ impl DeletePage {
                 }
                 DriveComboBoxMessage::DriveSelected(drive) => {
                     self.drive_combo_box.selected_drive = Some(drive.clone());
-                    CategoryComboBox::find_categories_for_drive(self.query_use_case.clone(), drive)
-                        .map(DeleteMessage::CategoryComboBox)
+                    self.find_categories_for_drive(drive)
                 }
             },
             DeleteMessage::EndDelete => {
                 self.is_deleted = true;
                 self.drive_combo_box.selected_drive = None;
-                self.category_combo_box.selected_category = None;
-                DriveComboBox::find_drives(self.query_use_case.clone())
+                self.selected_category = None;
+                self.drive_combo_box
+                    .find_drives()
                     .map(DeleteMessage::DriveComboBox)
             }
             DeleteMessage::StartDelete => {
@@ -98,6 +90,19 @@ impl DeletePage {
                 self.delete()
             }
         }
+    }
+
+    fn category_combo_box(
+        &'_ self,
+        translations: &HashMap<String, String>,
+    ) -> Element<'_, DeleteMessage> {
+        pick_list(
+            self.categories_per_drive.clone(),
+            self.selected_category.clone(),
+            DeleteMessage::CategorySelected,
+        )
+        .placeholder(tr!(translations, "select_category_placeholder"))
+        .into()
     }
 
     fn action_section(
@@ -146,13 +151,28 @@ impl DeletePage {
         self.drive_combo_box.selected_drive.is_some()
     }
 
-    fn delete(&self) -> Task<DeleteMessage> {
-        let delete_use_case = self.delete_use_case.clone();
-        let drive = self.drive_combo_box.selected_drive.clone().unwrap();
-        let category = self.category_combo_box.selected_category.clone();
+    fn find_categories_for_drive(&self, drive: String) -> Task<DeleteMessage> {
+        let repository = self.repository.clone();
         Task::perform(
             async move {
-                delete_use_case
+                repository
+                    .find_all_category_names_for_drive(&drive)
+                    .unwrap_or_else(|err| {
+                        popup_error(err);
+                        vec![]
+                    })
+            },
+            DeleteMessage::CategoriesFetched,
+        )
+    }
+
+    fn delete(&self) -> Task<DeleteMessage> {
+        let command_repository = self.repository.clone();
+        let drive = self.drive_combo_box.selected_drive.clone().unwrap();
+        let category = self.selected_category.clone();
+        Task::perform(
+            async move {
+                command_repository
                     .delete(&drive, category.as_deref())
                     .unwrap_or_else(popup_error);
             },

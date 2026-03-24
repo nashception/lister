@@ -1,7 +1,6 @@
 use crate::domain::model::file_entry::{FileEntry, FileWithMetadata};
 use crate::infrastructure::database::binary_format::UuidSqlite;
 use crate::infrastructure::database::entities::{FileWithMetadataDto, NewFileEntryDto};
-use uuid::Uuid;
 
 pub trait ToI64 {
     fn to_i64_or_zero(self) -> i64;
@@ -39,7 +38,7 @@ impl From<FileWithMetadataDto> for FileWithMetadata {
 impl From<(&FileEntry, UuidSqlite)> for NewFileEntryDto {
     fn from((file, drive_id): (&FileEntry, UuidSqlite)) -> Self {
         Self {
-            id: UuidSqlite(Uuid::now_v7()),
+            id: UuidSqlite::new(),
             drive_id,
             path: file.path.clone(),
             weight: file.size_bytes.to_i64_or_zero(),

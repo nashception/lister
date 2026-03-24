@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::application::file_query_service::FileQueryService;
-use crate::config::constants::{CACHED_SIZE, ITEMS_PER_PAGE};
 use crate::domain::model::file_entry::FileWithMetadata;
 use crate::domain::model::language::Language;
 use crate::domain::model::pagination::PaginatedResult;
+use crate::infrastructure::database::repository::ListerRepository;
 use crate::tr;
 use crate::ui::components::drive_combo_box::DriveComboBox;
 use crate::ui::components::read::cache::Cache;
@@ -19,8 +18,11 @@ use iced::keyboard::key::Named;
 use iced::widget::{column, row};
 use iced::{event, keyboard, Element, Event, Subscription, Task};
 
+const ITEMS_PER_PAGE: usize = 100;
+const CACHED_SIZE: u64 = 10000;
+
 pub struct ReadPage {
-    query_use_case: Arc<FileQueryService>,
+    repository: Arc<ListerRepository>,
     drive_combo_box: DriveComboBox,
     search: Search,
     pagination: Pagination,
@@ -30,11 +32,11 @@ pub struct ReadPage {
 }
 
 impl ReadPage {
-    pub fn new(query_use_case: Arc<FileQueryService>) -> (Self, Task<ReadMessage>) {
-        let (drive_combo_box, combo_box_task) = DriveComboBox::new(query_use_case.clone());
+    pub fn new(repository: Arc<ListerRepository>) -> (Self, Task<ReadMessage>) {
+        let (drive_combo_box, combo_box_task) = DriveComboBox::new(repository.clone());
         let (search, search_task) = Search::new();
         let page = Self {
-            query_use_case,
+            repository,
             drive_combo_box,
             search,
             pagination: Pagination::new(ITEMS_PER_PAGE),
@@ -182,25 +184,30 @@ impl ReadPage {
         } else {
             Some(self.search.query.clone())
         };
-        let query_use_case = self.query_use_case.clone();
+        let query_repository = self.repository.clone();
         let page = self.pagination.current_page_index;
         let ipp = self.pagination.items_per_page;
 
         Task::perform(
             async move {
-                let count = query_use_case
-                    .get_search_count(selected_drive.as_deref(), search_query.as_deref())
+                let count = query_repository
+                    .count_search_results(selected_drive.as_deref(), search_query.as_deref())
                     .unwrap_or(0);
                 let files = if count <= CACHED_SIZE {
-                    query_use_case
-                        .search_files(selected_drive.as_deref(), search_query.as_deref(), 0, count)
+                    query_repository
+                        .search_files_paginated(
+                            selected_drive.as_deref(),
+                            search_query.as_deref(),
+                            0,
+                            count,
+                        )
                         .unwrap_or_else(|err| {
                             popup_error(err);
                             vec![]
                         })
                 } else {
-                    query_use_case
-                        .search_files(
+                    query_repository
+                        .search_files_paginated(
                             selected_drive.as_deref(),
                             search_query.as_deref(),
                             page as u64,
@@ -338,13 +345,18 @@ impl ReadPage {
         } else {
             Some(self.search.query.clone())
         };
-        let query_use_case = self.query_use_case.clone();
+        let query_repository = self.repository.clone();
         let total = self.pagination.total_count;
 
         Task::perform(
             async move {
-                let files = query_use_case
-                    .search_files(selected_drive.as_deref(), search_query.as_deref(), 0, total)
+                let files = query_repository
+                    .search_files_paginated(
+                        selected_drive.as_deref(),
+                        search_query.as_deref(),
+                        0,
+                        total,
+                    )
                     .unwrap_or_else(|error| {
                         popup_error(error);
                         vec![]

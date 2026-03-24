@@ -1,4 +1,4 @@
-use crate::application::file_query_service::FileQueryService;
+use crate::infrastructure::database::repository::ListerRepository;
 use crate::tr;
 use crate::ui::messages::drive_combo_box::DriveComboBoxMessage;
 use crate::utils::dialogs::popup_error;
@@ -8,17 +8,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct DriveComboBox {
+    repository: Arc<ListerRepository>,
     pub drives: Vec<String>,
     pub selected_drive: Option<String>,
 }
 
 impl DriveComboBox {
-    pub fn new(query_use_case: Arc<FileQueryService>) -> (Self, Task<DriveComboBoxMessage>) {
+    pub fn new(repository: Arc<ListerRepository>) -> (Self, Task<DriveComboBoxMessage>) {
         let drive_combo_box = Self {
+            repository,
             drives: vec![],
             selected_drive: None,
         };
-        let task = Self::find_drives(query_use_case);
+        let task = drive_combo_box.find_drives();
         (drive_combo_box, task)
     }
 
@@ -35,10 +37,11 @@ impl DriveComboBox {
         .into()
     }
 
-    pub fn find_drives(query_use_case: Arc<FileQueryService>) -> Task<DriveComboBoxMessage> {
+    pub fn find_drives(&self) -> Task<DriveComboBoxMessage> {
+        let repository = self.repository.clone();
         Task::perform(
             async move {
-                query_use_case.list_drive_names().unwrap_or_else(|err| {
+                repository.find_all_drive_names().unwrap_or_else(|err| {
                     popup_error(err);
                     vec![]
                 })

@@ -1,27 +1,24 @@
-use crate::config::constants::MIGRATIONS;
-use crate::domain::errors::domain_error::DomainError;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError, PooledConnection};
-use diesel_migrations::MigrationHarness;
-use std::sync::Arc;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
 type DieselPool = Pool<ConnectionManager<SqliteConnection>>;
 pub type DieselConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
 
 #[derive(Debug, thiserror::Error)]
-pub enum RepositoryError {
+pub enum InfrastructureError {
     #[error("Database error: {0}")]
     Database(#[from] diesel::result::Error),
     #[error("Connection pool error: {0}")]
     ConnectionPool(#[from] PoolError),
     #[error("Migration error: {0}")]
     Migration(String),
-}
-
-impl From<RepositoryError> for DomainError {
-    fn from(e: RepositoryError) -> Self {
-        Self::RepositoryFailure(e.to_string())
-    }
+    #[error("Error reading file metadata: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Error deserializing json: {0}")]
+    DeserializeError(#[from] serde_json::Error),
 }
 
 /// Core database pool and infrastructure for `SQLite` repositories.
@@ -41,10 +38,10 @@ impl SqliteRepositoryPool {
     ///
     /// # Errors
     ///
-    /// Returns a [`RepositoryError`] if:
-    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while creating or acquiring a connection.
-    /// - A [`Database`](RepositoryError::Database) error occurs during database initialization.
-    /// - A [`Migration`](RepositoryError::Migration) error occurs while applying migrations.
+    /// Returns a [`InfrastructureError`] if:
+    /// - A [`ConnectionPool`](InfrastructureError::ConnectionPool) error occurs while creating or acquiring a connection.
+    /// - A [`Database`](InfrastructureError::Database) error occurs during database initialization.
+    /// - A [`Migration`](InfrastructureError::Migration) error occurs while applying migrations.
     ///
     /// # Parameters
     ///
@@ -52,33 +49,31 @@ impl SqliteRepositoryPool {
     ///
     /// # Returns
     ///
-    /// Returns an [`Arc`] pointing to the initialized [`SqliteRepositoryPool`] instance upon success.
-    pub fn new(database_url: &str) -> Result<Arc<Self>, RepositoryError> {
+    /// Returns the initialized [`SqliteRepositoryPool`] instance upon success.
+    pub fn new(database_url: &str) -> Result<Self, InfrastructureError> {
         let pool = Self::create_pool(database_url)?;
-        {
-            let mut conn = pool.get().map_err(RepositoryError::ConnectionPool)?;
-            Self::enable_foreign_keys(&mut conn)?;
-            Self::apply_pragmas(&mut conn)?;
-            Self::run_migrations(&mut conn)?;
-        }
-        Ok(Arc::new(Self { pool }))
+        let mut conn = pool.get().map_err(InfrastructureError::ConnectionPool)?;
+        Self::enable_foreign_keys(&mut conn)?;
+        Self::apply_pragmas(&mut conn)?;
+        Self::run_migrations(&mut conn)?;
+        Ok(Self { pool })
     }
 
-    fn create_pool(database_url: &str) -> Result<DieselPool, RepositoryError> {
+    fn create_pool(database_url: &str) -> Result<DieselPool, InfrastructureError> {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
         Pool::builder()
             .build(manager)
-            .map_err(RepositoryError::ConnectionPool)
+            .map_err(InfrastructureError::ConnectionPool)
     }
 
-    fn enable_foreign_keys(conn: &mut SqliteConnection) -> Result<(), RepositoryError> {
+    fn enable_foreign_keys(conn: &mut SqliteConnection) -> Result<(), InfrastructureError> {
         diesel::sql_query("PRAGMA foreign_keys = ON;")
             .execute(conn)
-            .map_err(RepositoryError::Database)?;
+            .map_err(InfrastructureError::Database)?;
         Ok(())
     }
 
-    fn apply_pragmas(conn: &mut SqliteConnection) -> Result<(), RepositoryError> {
+    fn apply_pragmas(conn: &mut SqliteConnection) -> Result<(), InfrastructureError> {
         let pragmas = [
             "PRAGMA journal_mode = WAL;",
             "PRAGMA synchronous = NORMAL;",
@@ -89,14 +84,14 @@ impl SqliteRepositoryPool {
         for pragma in pragmas {
             diesel::sql_query(pragma)
                 .execute(conn)
-                .map_err(RepositoryError::Database)?;
+                .map_err(InfrastructureError::Database)?;
         }
         Ok(())
     }
 
-    fn run_migrations(conn: &mut SqliteConnection) -> Result<(), RepositoryError> {
+    fn run_migrations(conn: &mut SqliteConnection) -> Result<(), InfrastructureError> {
         conn.run_pending_migrations(MIGRATIONS)
-            .map_err(|err| RepositoryError::Migration(err.to_string()))?;
+            .map_err(|err| InfrastructureError::Migration(err.to_string()))?;
         Ok(())
     }
 
@@ -107,14 +102,14 @@ impl SqliteRepositoryPool {
     ///
     /// # Errors
     ///
-    /// Returns a [`RepositoryError`] if:
-    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
+    /// Returns a [`InfrastructureError`] if:
+    /// - A [`ConnectionPool`](InfrastructureError::ConnectionPool) error occurs while acquiring a connection.
     ///
     /// # Returns
     ///
     /// Returns a pooled [`DieselConnection`] on success.
-    pub fn get_connection(&self) -> Result<DieselConnection, RepositoryError> {
-        self.pool.get().map_err(RepositoryError::ConnectionPool)
+    pub fn get_connection(&self) -> Result<DieselConnection, InfrastructureError> {
+        self.pool.get().map_err(InfrastructureError::ConnectionPool)
     }
 
     /// Executes a database operation with automatic connection management.
@@ -124,9 +119,9 @@ impl SqliteRepositoryPool {
     ///
     /// # Errors
     ///
-    /// Returns a [`RepositoryError`] if:
-    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
-    /// - A [`Database`](RepositoryError::Database) error occurs during the operation.
+    /// Returns a [`InfrastructureError`] if:
+    /// - A [`ConnectionPool`](InfrastructureError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](InfrastructureError::Database) error occurs during the operation.
     ///
     /// # Parameters
     ///
@@ -135,9 +130,9 @@ impl SqliteRepositoryPool {
     /// # Returns
     ///
     /// Returns the result of the provided operation if successful.
-    pub fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    pub fn execute_db_operation<F, R>(&self, operation: F) -> Result<R, InfrastructureError>
     where
-        F: FnOnce(&mut DieselConnection) -> Result<R, RepositoryError>,
+        F: FnOnce(&mut DieselConnection) -> Result<R, InfrastructureError>,
     {
         let mut conn = self.get_connection()?;
         operation(&mut conn)
@@ -153,9 +148,9 @@ impl SqliteRepositoryPool {
     ///
     /// # Errors
     ///
-    /// Returns a [`RepositoryError`] if:
-    /// - A [`ConnectionPool`](RepositoryError::ConnectionPool) error occurs while acquiring a connection.
-    /// - A [`Database`](RepositoryError::Database) error occurs during the transaction.
+    /// Returns a [`InfrastructureError`] if:
+    /// - A [`ConnectionPool`](InfrastructureError::ConnectionPool) error occurs while acquiring a connection.
+    /// - A [`Database`](InfrastructureError::Database) error occurs during the transaction.
     ///
     /// # Parameters
     ///
@@ -164,9 +159,9 @@ impl SqliteRepositoryPool {
     /// # Returns
     ///
     /// Returns the result of the transaction closure upon success.
-    pub fn execute_in_transaction<F, R>(&self, operation: F) -> Result<R, RepositoryError>
+    pub fn execute_in_transaction<F, R>(&self, operation: F) -> Result<R, InfrastructureError>
     where
-        F: FnOnce(&mut SqliteConnection) -> Result<R, RepositoryError>,
+        F: FnOnce(&mut SqliteConnection) -> Result<R, InfrastructureError>,
     {
         let mut conn = self.get_connection()?;
         conn.immediate_transaction(|conn| operation(conn))

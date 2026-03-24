@@ -1,6 +1,7 @@
 use crate::domain::model::language::Language;
+use crate::infrastructure::database::repository::ListerRepository;
+use crate::infrastructure::i18n::json_translation_loader::load_translations;
 use crate::tr;
-use crate::ui::app_factory::ListerAppService;
 use crate::ui::messages::app_message::AppMessage;
 use crate::ui::messages::toaster_message::ToasterMessage;
 use crate::ui::pages::delete_page::DeletePage;
@@ -16,6 +17,7 @@ use iced::window::{icon, Icon, Settings};
 use iced::{event, keyboard, Alignment, Element, Event, Length, Subscription, Task};
 use iced_toaster::{info_toast, toaster, Toaster};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 enum Page {
     Delete(DeletePage),
@@ -31,7 +33,7 @@ pub enum PageKind {
 }
 
 pub struct ListerApp {
-    service: ListerAppService,
+    repository: Arc<ListerRepository>,
     current_language: Language,
     translations: HashMap<String, String>,
     current_page: Page,
@@ -39,14 +41,14 @@ pub struct ListerApp {
 }
 
 impl ListerApp {
-    pub fn new(service: ListerAppService) -> (Self, Task<AppMessage>) {
-        let (current_language, translations) = service.translations();
+    pub fn new(repository: Arc<ListerRepository>) -> (Self, Task<AppMessage>) {
+        let (current_language, translations) = repository.translations();
 
-        let (read_page, task) = ReadPage::new(service.query_use_case.clone());
+        let (read_page, task) = ReadPage::new(repository.clone());
 
         (
             Self {
-                service,
+                repository,
                 current_language,
                 translations,
                 current_page: Page::Read(read_page),
@@ -111,10 +113,10 @@ impl ListerApp {
                 self.change_page(next)
             }
             AppMessage::CompactDatabase => {
-                let query_use_case = self.service.query_use_case.clone();
+                let repository = self.repository.clone();
                 Task::perform(
                     async move {
-                        query_use_case.compact().unwrap_or_else(|err| {
+                        repository.compact().unwrap_or_else(|err| {
                             popup_error(err);
                             0
                         })
@@ -257,13 +259,16 @@ impl ListerApp {
     }
 
     fn change_language(&self, language: Language) -> Task<AppMessage> {
-        let language_use_case = self.service.language_use_case.clone();
+        let language_use_case = self.repository.clone();
         Task::perform(
             async move {
-                language_use_case.set_language(&language).ok();
-                let translations = language_use_case
-                    .load_translations(&language)
-                    .unwrap_or_default();
+                language_use_case
+                    .set_language(&language)
+                    .unwrap_or_else(popup_error);
+                let translations = load_translations(&language).unwrap_or_else(|err| {
+                    popup_error(err);
+                    HashMap::default()
+                });
                 (language, translations)
             },
             |(language, translations)| AppMessage::LanguageChanged(language, translations),
@@ -283,23 +288,17 @@ impl ListerApp {
         }
         match page_kind {
             PageKind::Delete => {
-                let (page, task) = DeletePage::new(
-                    self.service.delete_use_case.clone(),
-                    self.service.query_use_case.clone(),
-                );
+                let (page, task) = DeletePage::new(self.repository.clone());
                 self.current_page = Page::Delete(page);
                 task.map(AppMessage::Delete)
             }
             PageKind::Read => {
-                let (page, task) = ReadPage::new(self.service.query_use_case.clone());
+                let (page, task) = ReadPage::new(self.repository.clone());
                 self.current_page = Page::Read(page);
                 task.map(AppMessage::Read)
             }
             PageKind::Write => {
-                let (page, task) = WritePage::new(
-                    self.service.indexing_use_case.clone(),
-                    self.service.directory_picker.clone(),
-                );
+                let (page, task) = WritePage::new(self.repository.clone());
                 self.current_page = Page::Write(page);
                 task.map(AppMessage::Write)
             }
